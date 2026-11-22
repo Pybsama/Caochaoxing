@@ -88,7 +88,7 @@ Android 端仅使用纯开源（FOSS）依赖与开放地图接口，**未引入
 
 本次检查的原有蓝绿图标与上游当前 launcher 图标外观不同；对上游快照的全部普通文件进行 SHA-256 比较，未发现完全相同的文件。这个结果不能证明它从未使用第三方素材，也不能确定其创作来源。
 
-当前三端图标改自《BLACK SOULS II》（开发者 Eeny, meeny, miny, moe?）中爱丽丝捧着绘本的游戏画面，截图见 FGGuides 的角色资料。项目对截图做了灰度转换、嘴型局部调整和方形留白。[原始截图](https://fgguides.com/wp-content/uploads/2024/10/Daughter-Alice.png) · [游戏官方页面](https://store.steampowered.com/app/3855540/BLACK_SOULS_II/)
+当前三端图标改自《BLACK SOULS II》（开发者 Eeny, meeny, miny, moe?）中爱丽丝捧着绘本的游戏画面，截图见 FGGuides 的角色资料。项目对截图做了灰度转换、嘴型局部调整和满版方形裁切。[原始截图](https://fgguides.com/wp-content/uploads/2024/10/Daughter-Alice.png) · [游戏官方页面](https://store.steampowered.com/app/3855540/BLACK_SOULS_II/)
 
 代码和图标导出脚本采用 AGPL-3.0-only。游戏角色与画面的权利归原权利人，图标定稿、各端图标及预览的公开分发授权待确认。[图标定稿](docs/artwork/Avatar.png) · [导出脚本](docs/artwork/render-icon.swift) · [平台图标预览](docs/artwork/ANDROID_ICON.md)
 

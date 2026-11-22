@@ -3,6 +3,7 @@
 //
 // From the repository root: swift docs/artwork/render-icon.swift
 import CoreGraphics
+import CoreImage
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -18,8 +19,7 @@ let paper = CGColor(gray: 1, alpha: 1)
 let ink = CGColor(gray: 0.09, alpha: 1)
 let black = CGColor(gray: 0, alpha: 1)
 
-// A themed launcher tints alpha. Derive it from the ink so the white paper
-// and the space around the illustration take on the launcher's background.
+// A themed launcher tints alpha. Let the paper take on the launcher's background.
 func makeInkMask(_ image: CGImage) -> CGImage {
     let gray = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
                          bytesPerRow: 0, space: CGColorSpaceCreateDeviceGray(),
@@ -83,14 +83,18 @@ paintTile(ios, rect: CGRect(x: 0, y: 0, width: 1024, height: 1024), radius: 0)
 try save(ios, to: "Sources/CaochaoxingIOS/Assets.xcassets/AppIcon.appiconset/AppIcon.png")
 
 let mac = canvas(1024, 1024)
-paintTile(mac, rect: CGRect(x: 88, y: 88, width: 848, height: 848), radius: 189)
+paintTile(mac, rect: CGRect(x: 0, y: 0, width: 1024, height: 1024), radius: 228)
 try save(mac, to: "Sources/CaochaoxingMac/Resources/AppIcon.png")
 
-// The master already includes its margins. Map it to the launcher's visible 72 dp.
-let adaptiveScale = 72.0 / 108.0
+// Keep the entire composition in the visible 72 dp. Extend its edge pixels
+// into the remaining 18 dp on each side for launcher motion and different masks.
+let visible = canvas(288, 288)
+drawInk(visible, in: CGRect(x: 0, y: 0, width: 288, height: 288), color: black)
+let visibleImage = CIImage(cgImage: visible.makeImage()!)
+let layer = CIContext().createCGImage(visibleImage.clampedToExtent(),
+                                      from: visibleImage.extent.insetBy(dx: -72, dy: -72))!
 let android = canvas(432, 432)
-let inset = 432 * (1 - adaptiveScale) / 2
-drawInk(android, in: CGRect(x: 0, y: 0, width: 432, height: 432).insetBy(dx: inset, dy: inset), color: black)
+android.draw(layer, in: CGRect(x: 0, y: 0, width: 432, height: 432))
 try save(android, to: "android/app/src/main/res/drawable-nodpi/ic_launcher_foreground.png")
 
 let preview = canvas(576, 192, opaque: true)
