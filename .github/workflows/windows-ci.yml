@@ -15,9 +15,23 @@ on:
       - 'android/core/**'
       - '.github/workflows/windows-ci.yml'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional GitHub Release tag to attach Windows artifacts to (e.g. v1.1.0)'
+        required: false
+        default: ''
+      source_run_id:
+        description: 'Optional existing Windows CI run ID to reuse already-built artifacts'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
 
 jobs:
   build-and-package:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.source_run_id == '' }}
     runs-on: windows-latest
     defaults:
       run:
@@ -93,3 +107,27 @@ jobs:
         with:
           name: Caochaoxing-windows-msi
           path: windows/app/build/compose/binaries/main/msi/*.msi
+
+      - name: Attach freshly built Windows assets to Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem "app/build/compose/binaries/main/msi/*.msi" | Select-Object -First 1
+          gh release upload "${{ inputs.release_tag }}" "app/build/Caochaoxing-windows-portable.zip" "$($msi.FullName)" --clobber
+
+  attach-existing-artifacts:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && inputs.source_run_id != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifacts from run and upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/win-release
+          gh run download "${{ inputs.source_run_id }}" --repo "${{ github.repository }}" --dir /tmp/win-release
+          MSI_FILE=$(find /tmp/win-release -name "*.msi" | head -n 1)
+          ZIP_FILE=$(find /tmp/win-release -name "Caochaoxing-windows-portable.zip" | head -n 1)
+          ls -lh "$MSI_FILE" "$ZIP_FILE"
+          gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" "$ZIP_FILE" --repo "${{ github.repository }}" --clobber
