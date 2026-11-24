@@ -4,7 +4,7 @@
 
 Caochaoxing 的项目代码采用 GNU Affero General Public License version 3（`AGPL-3.0-only`）。协议原文保留了 Free Software Foundation 的版权声明。[LICENSE](LICENSE)
 
-本项目的 Swift / SwiftUI（macOS & iOS）与 Kotlin / Jetpack Compose（Android）实现及整理修改：Copyright (c) 2026 Pybsama。
+本项目的 Swift / SwiftUI（macOS & iOS）、Kotlin / Jetpack Compose（Android）与 Kotlin / Compose Multiplatform（Windows）实现及整理修改：Copyright (c) 2026 Pybsama。
 
 ## ChaoxingSignFaker
 
@@ -83,6 +83,18 @@ Android 端仅使用纯开源（FOSS）依赖与开放地图接口，**未引入
 | JUnit 5（含 `junit5-launcher` `testRuntimeOnly`） / JUnit 4 / `kotlinx-coroutines-test` | `5.11.3` / `4.13.2` / `1.9.0` | EPL-2.0 / EPL-1.0 / Apache-2.0 | 仅用于测试作用域（`testImplementation` / `testRuntimeOnly`） |
 | Leaflet | `1.9.4` | BSD-2-Clause | 在 `android/app/src/main/assets/leaflet_picker.html` 中通过 HTTPS 按需加载用于交互选点（离线回退本地 `<canvas>` 网格） |
 | OpenStreetMap 瓦片与 Nominatim 地理编码服务 | 在线接口 | ODbL 1.0 | 开放地图底图瓦片与关键词地理编码，地图数据 © OpenStreetMap contributors |
+
+## Windows 桌面端第三方开源依赖声明
+
+Windows 桌面端直接复用 `android/core`，同样保持 100% 纯开源（FOSS）依赖：
+
+| 组件 / 服务 | 版本 | 许可证 | 用途说明 |
+| --- | --- | --- | --- |
+| Compose Multiplatform for Desktop (`org.jetbrains.compose`) | `1.7.1` | Apache-2.0 | Windows / 桌面端 Material 3 声明式 UI、窗口与原生安装包打包（详见 [windows/gradle/libs.versions.toml](windows/gradle/libs.versions.toml)） |
+| `kotlinx-coroutines-swing` | `1.9.0` | Apache-2.0 | 桌面 Swing / AWT 主线程协程调度 |
+| JNA / JNA Platform (`net.java.dev.jna`) | `5.15.0` | Apache-2.0 / LGPL-2.1 | 调用 Windows 原生 DPAPI (`CryptProtectData` / `CryptUnprotectData`) 与 `Kernel32.SetThreadExecutionState` 防息屏 |
+| ZXing Core (`com.google.zxing:core`) | `3.5.3` | Apache-2.0 | 本地图片与剪贴板截图二维码解码 |
+| OkHttp / `kotlinx-serialization-json` / OpenStreetMap Nominatim | 同 `:core` | Apache-2.0 / ODbL 1.0 | 与 Android 端共享网络、序列化与开放地理编码能力 |
 
 ## 图标及其他素材
 

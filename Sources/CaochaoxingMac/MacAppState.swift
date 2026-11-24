@@ -402,7 +402,14 @@ public final class MacBatchWatchWorker: Identifiable {
     public var isMuted: Bool
     public var isBuffering: Bool
     public var isPlayerReady: Bool
+    public var hasPlaybackStarted: Bool
     public var playerError: String?
+
+    /// `true` once the player has finished initial loading/buffering and started rendering frames,
+    /// or when no direct media stream can be loaded (allowing heartbeat-only fallback without deadlocking).
+    public var isPlaybackReadyForStudy: Bool {
+        hasPlaybackStarted || playerError != nil || candidatePlayURLs.isEmpty
+    }
 
     @ObservationIgnored private var candidatePlayURLs: [String]
     @ObservationIgnored private var currentPlayURLIndex = 0
@@ -436,14 +443,16 @@ public final class MacBatchWatchWorker: Identifiable {
         self.displayedSec = initialSec
         self.reportedSec = initialSec
         self.nextTickInSec = 0
-        self.statusText = "正在缓冲同步..."
+        self.statusText = "等待视频加载缓冲..."
         self.isPassed = false
         self.isMuted = true
         self.isBuffering = !initialURLs.isEmpty
         self.isPlayerReady = false
+        self.hasPlaybackStarted = initialURLs.isEmpty
         self.playerError = nil
 
         self.player.isMuted = true
+        self.player.automaticallyWaitsToMinimizeStalling = true
         self.player.defaultRate = Float(video.allowedMaxRate)
         startPlayback(startAtSec: initialSec)
     }
@@ -471,15 +480,17 @@ public final class MacBatchWatchWorker: Identifiable {
         self.player = AVPlayer()
         self.displayedSec = initialSec
         self.reportedSec = initialSec
-        self.nextTickInSec = 29
+        self.nextTickInSec = 0
         self.statusText = "连接直播回放 (\(liveTask.statusDescription))..."
         self.isPassed = false
         self.isMuted = true
         self.isBuffering = !initialURLs.isEmpty
         self.isPlayerReady = false
+        self.hasPlaybackStarted = false
         self.playerError = nil
 
         self.player.isMuted = true
+        self.player.automaticallyWaitsToMinimizeStalling = true
         self.player.defaultRate = 1.0
         startPlayback(startAtSec: initialSec)
     }
@@ -537,15 +548,18 @@ public final class MacBatchWatchWorker: Identifiable {
             return
         }
 
-        // Bound forward buffer per concurrent tile so 3-5 simultaneous HD live streams don't starve each other.
-        item.preferredForwardBufferDuration = 10
+        // Keep forward buffer lean and cap peak HLS bitrate so 5-10 simultaneous tiles start up quickly without saturating bandwidth.
+        item.preferredForwardBufferDuration = 3
+        item.preferredPeakBitRate = 1_500_000
 
         let shouldSeek = startAtSec > 0 && startAtSec < max(1, duration - 3)
         pendingSeekSec = shouldSeek ? startAtSec : nil
         isBuffering = true
         isPlayerReady = false
+        hasPlaybackStarted = false
         playerError = nil
 
+        player.automaticallyWaitsToMinimizeStalling = true
         player.defaultRate = Float(legalRate)
         player.replaceCurrentItem(with: item)
 
@@ -568,6 +582,9 @@ public final class MacBatchWatchWorker: Identifiable {
                 switch tc {
                 case .playing:
                     self.isBuffering = false
+                    if self.isPlayerReady && self.pendingSeekSec == nil {
+                        self.hasPlaybackStarted = true
+                    }
                     self.bufferingWatchdogTask?.cancel()
                     self.bufferingWatchdogTask = nil
                 case .waitingToPlayAtSpecifiedRate:
@@ -600,12 +617,20 @@ public final class MacBatchWatchWorker: Identifiable {
                                 self.player.defaultRate = Float(self.legalRate)
                                 self.player.play()
                                 self.player.rate = Float(self.legalRate)
+                                if self.player.timeControlStatus == .playing {
+                                    self.isBuffering = false
+                                    self.hasPlaybackStarted = true
+                                }
                             }
                         }
                     } else {
                         self.player.defaultRate = Float(self.legalRate)
                         self.player.play()
                         self.player.rate = Float(self.legalRate)
+                        if self.player.timeControlStatus == .playing {
+                            self.isBuffering = false
+                            self.hasPlaybackStarted = true
+                        }
                     }
                 case .failed:
                     self.bufferingWatchdogTask?.cancel()
@@ -855,7 +880,7 @@ public final class MacAppState {
     public var autoWatchTaskId: String?
 
     // Streaming multi-way concurrent watch state
-    public var maxConcurrentWatches: Int = 3 {
+    public var maxConcurrentWatches: Int = 5 {
         didSet { UserDefaults.standard.set(maxConcurrentWatches, forKey: "caochaoxing.mac.maxConcurrency") }
     }
     public var watchAllCoursesAutomatically: Bool = false {
@@ -912,7 +937,7 @@ public final class MacAppState {
         self.clientConfiguration = clientConfiguration
         self.waitBetweenSignAccounts = waitBetweenSignAccounts
         let savedConcurrency = UserDefaults.standard.integer(forKey: "caochaoxing.mac.maxConcurrency")
-        if savedConcurrency >= 1 && savedConcurrency <= 8 {
+        if savedConcurrency >= 1 && savedConcurrency <= 10 {
             self.maxConcurrentWatches = savedConcurrency
         }
         if UserDefaults.standard.object(forKey: "caochaoxing.mac.autoAdvance") != nil {
@@ -1405,6 +1430,37 @@ public final class MacAppState {
         return list.first(where: { ($0.pendingJobCount ?? 0) > 0 }) ?? list.first
     }
 
+    public func activeCookiesForWebView() -> [ChaoxingStoredCookie] {
+        if let live = client?.exportCookies(), !live.isEmpty {
+            return live
+        }
+        return activeAccount?.cookies ?? []
+    }
+
+    public func chapterStudyURL(for chapter: ChaoxingChapterNode) -> URL? {
+        let resolvedCpi = currentCpi > 0 ? currentCpi : (selectedStudyCourse?.cpi ?? 0)
+        var comps = URLComponents(string: "https://mooc1.chaoxing.com/mycourse/studentstudy")
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "chapterId", value: chapter.id),
+            URLQueryItem(name: "courseId", value: String(chapter.courseId)),
+            URLQueryItem(name: "clazzid", value: String(chapter.classId)),
+            URLQueryItem(name: "mooc2", value: "1")
+        ]
+        if resolvedCpi > 0 {
+            items.append(URLQueryItem(name: "cpi", value: String(resolvedCpi)))
+        }
+        comps?.queryItems = items
+        return comps?.url
+    }
+
+    public func refreshSelectedChapterAfterWebSession() {
+        if let chapter = selectedChapter {
+            let cacheKey = "\(chapter.courseId)_\(chapter.classId)_\(chapter.id)"
+            chapterContentCache.removeValue(forKey: cacheKey)
+            selectChapter(chapter, forceRefresh: true)
+        }
+    }
+
     public func selectChapter(_ chapter: ChaoxingChapterNode, forceRefresh: Bool = false) {
         if !forceRefresh && selectedChapter?.id == chapter.id && (isLoadingVideos || !videos.isEmpty || !liveTasks.isEmpty || !chapterAttachments.isEmpty) {
             return
@@ -1660,6 +1716,16 @@ public final class MacAppState {
             let outcome = await self.runLegalHeartbeatLoop(
                 for: video,
                 client: client,
+                isReadyForStudy: { [weak self] in
+                    guard let self else { return true }
+                    return (self.playerController.isReady && !self.playerController.isBuffering)
+                        || self.playerController.playerErrorMessage != nil
+                        || (video.videoPlayURL?.isEmpty ?? true)
+                },
+                isCurrentlyBuffering: { [weak self] in
+                    guard let self else { return false }
+                    return self.playerController.isBuffering && self.playerController.playerErrorMessage == nil
+                },
                 onProgress: { displayed, reported, nextTick, status in
                     self.autoWatchDisplayedSec = displayed
                     self.autoWatchReportedSec = reported
@@ -1845,7 +1911,7 @@ public final class MacAppState {
                         continue
                     }
 
-                    let chunkSize = 6
+                    let chunkSize = max(6, min(10, effectiveConcurrency))
                     var offset = 0
                     while offset < candidateChapters.count && !Task.isCancelled {
                         let end = min(candidateChapters.count, offset + chunkSize)
@@ -1940,7 +2006,16 @@ public final class MacAppState {
                 }
                 let canLaunchNow = cooldownUntil == nil
 
+                var launchedThisCycle = 0
                 while canLaunchNow && self.batchActiveWorkers.count < effectiveConcurrency && !pendingQueue.isEmpty && !Task.isCancelled {
+                    if launchedThisCycle > 0 {
+                        // Gently stagger multi-stream launches (5-10 tiles) so CDN/TLS handshakes don't stall each other.
+                        try? await Task.sleep(for: .milliseconds(350))
+                        if Task.isCancelled || self.batchActiveWorkers.count >= effectiveConcurrency || pendingQueue.isEmpty {
+                            break
+                        }
+                    }
+                    launchedThisCycle += 1
                     let item = pendingQueue.removeFirst()
                     self.batchQueueCount = pendingQueue.count
                     let itemId = item.payload.id
@@ -1972,6 +2047,8 @@ public final class MacAppState {
                             outcome = await self.runLegalHeartbeatLoop(
                                 for: v,
                                 client: client,
+                                isReadyForStudy: { worker.isPlaybackReadyForStudy },
+                                isCurrentlyBuffering: { worker.isBuffering && worker.playerError == nil },
                                 onProgress: { displayed, reported, nextTick, status in
                                     worker.displayedSec = displayed
                                     worker.reportedSec = reported
@@ -1986,6 +2063,8 @@ public final class MacAppState {
                             outcome = await self.runLegalLiveReplayLoop(
                                 for: live,
                                 client: client,
+                                isReadyForStudy: { worker.isPlaybackReadyForStudy },
+                                isCurrentlyBuffering: { worker.isBuffering && worker.playerError == nil },
                                 onProgress: { displayed, reported, nextTick, status in
                                     worker.displayedSec = displayed
                                     worker.reportedSec = reported
@@ -2106,6 +2185,8 @@ public final class MacAppState {
             let outcome = await self.runLegalLiveReplayLoop(
                 for: live,
                 client: client,
+                isReadyForStudy: { worker.isPlaybackReadyForStudy },
+                isCurrentlyBuffering: { worker.isBuffering && worker.playerError == nil },
                 onProgress: { displayed, reported, nextTick, status in
                     worker.displayedSec = displayed
                     worker.reportedSec = reported
@@ -2134,16 +2215,46 @@ public final class MacAppState {
         }
     }
 
+    /// Suspends auto-watch heartbeat startup until the player finishes loading & initial buffering
+    /// (or permanently fails / has no stream URL). Returns `false` if cancelled while waiting.
+    func waitUntilPlaybackReady(
+        title: String,
+        isReady: @MainActor () -> Bool,
+        onWaiting: @MainActor (Int) -> Void
+    ) async -> Bool {
+        if isReady() {
+            return true
+        }
+        let startedAt = Date()
+        while !Task.isCancelled {
+            if isReady() {
+                let waited = max(1, Int(round(Date().timeIntervalSince(startedAt))))
+                appendLog("[\(title)] 加载与缓冲完成（用时 \(waited)s），正式开始自动刷课")
+                return true
+            }
+            let elapsed = Int(floor(Date().timeIntervalSince(startedAt)))
+            onWaiting(elapsed)
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+            } catch {
+                return false
+            }
+        }
+        return false
+    }
+
     /// Wall-clock-accurate 30-second heartbeat loop for `zhibo.chaoxing.com` live replays.
     /// Follows Chaoxing's official `setFunction()` (`/saveTimePc` at `isStart=0`, then `isStart=1` at 29s and every 30s
     /// plus `/apis/live/put/watchMoment`) and periodically syncs real persisted server progress via `/ananas/live/liveinfo`.
     private func runLegalLiveReplayLoop(
         for initialLive: ChaoxingLiveTask,
         client: ChaoxingHTTPClient,
+        isReadyForStudy: @MainActor () -> Bool = { true },
+        isCurrentlyBuffering: @MainActor () -> Bool = { false },
         onProgress: @MainActor (Int, Int, Int, String) -> Void,
         onSessionReady: @MainActor (Int, [String]) -> Void
     ) async -> WorkerOutcome {
-        onProgress(initialLive.watchedSeconds, initialLive.watchedSeconds, 29, "关联课程并初始化直播回放会话...")
+        onProgress(initialLive.watchedSeconds, initialLive.watchedSeconds, 0, "关联课程并初始化直播回放会话...")
         var session: ChaoxingLiveSessionContext
         do {
             session = try await ChaoxingCourseStudyService.prepareLiveReplaySession(client: client, task: initialLive)
@@ -2182,6 +2293,16 @@ public final class MacAppState {
             }
         }
 
+        // Wait until the video stream finishes loading & initial buffering before starting auto-watch heartbeats.
+        let ready = await waitUntilPlaybackReady(
+            title: initialLive.title,
+            isReady: isReadyForStudy,
+            onWaiting: { waitedSec in
+                onProgress(estimatedSec, serverConfirmedSec, 0, "等待回放缓冲完成 (\(waitedSec)s)...")
+            }
+        )
+        guard ready, !Task.isCancelled else { return .skipped }
+
         // Initial `isStart=0` heartbeat (exact official `watchTime == 1` call).
         onProgress(estimatedSec, serverConfirmedSec, 29, "发送直播起播心跳 (isStart=0)...")
         do {
@@ -2215,18 +2336,29 @@ public final class MacAppState {
         while !Task.isCancelled && tickCount < maxTicks {
             // Exact official cadence: watchTime == 1 (isStart=0) -> 30 (+29s) -> 60 (+30s) -> 90 (+30s)...
             let stepSec = tickCount == 0 ? 29 : 30
-            let segmentStart = Date()
+            var activeElapsed: Double = 0
+            var lastTickAt = Date()
             while !Task.isCancelled {
-                let elapsed = Date().timeIntervalSince(segmentStart)
-                let remain = Int(ceil(Double(stepSec) - elapsed))
+                let now = Date()
+                let delta = max(0, min(2.0, now.timeIntervalSince(lastTickAt)))
+                lastTickAt = now
+                let buffering = isCurrentlyBuffering()
+                if !buffering {
+                    activeElapsed += delta
+                }
+                let remain = Int(ceil(Double(stepSec) - activeElapsed))
                 if remain <= 0 { break }
                 let visualSec = targetDuration > 0
-                    ? min(targetDuration, estimatedSec + Int(floor(elapsed)))
-                    : (estimatedSec + Int(floor(elapsed)))
-                let pctText = serverPercent > 0
-                    ? " · 服务端入库 \(String(format: "%.1f%%", serverPercent))"
-                    : " · 每60s入库同步"
-                onProgress(visualSec, serverConfirmedSec, remain, "直播回放合法同步中\(pctText)")
+                    ? min(targetDuration, estimatedSec + Int(floor(activeElapsed)))
+                    : (estimatedSec + Int(floor(activeElapsed)))
+                if buffering {
+                    onProgress(visualSec, serverConfirmedSec, remain, "缓冲中，暂停计时...")
+                } else {
+                    let pctText = serverPercent > 0
+                        ? " · 服务端入库 \(String(format: "%.1f%%", serverPercent))"
+                        : " · 每60s入库同步"
+                    onProgress(visualSec, serverConfirmedSec, remain, "直播回放合法同步中\(pctText)")
+                }
                 do {
                     try await Task.sleep(for: .milliseconds(500))
                 } catch {
@@ -2371,6 +2503,8 @@ public final class MacAppState {
     private func runLegalHeartbeatLoop(
         for initialVideo: ChaoxingVideoTask,
         client: ChaoxingHTTPClient,
+        isReadyForStudy: @MainActor () -> Bool = { true },
+        isCurrentlyBuffering: @MainActor () -> Bool = { false },
         onProgress: @MainActor (Int, Int, Int, String) -> Void,
         onLoopRestart: @MainActor (Int) -> Void
     ) async -> WorkerOutcome {
@@ -2387,6 +2521,16 @@ public final class MacAppState {
         var completedPasses = 0
         let maxPasses = 2
         var consecutiveErrors = 0
+
+        // Wait until the player finishes loading & initial buffering before sending `play(3)` and starting auto-watch.
+        let ready = await waitUntilPlaybackReady(
+            title: video.name,
+            isReady: isReadyForStudy,
+            onWaiting: { waitedSec in
+                onProgress(reportedSec, reportedSec, 0, "等待缓冲完成 (\(waitedSec)s)...")
+            }
+        )
+        guard ready, !Task.isCancelled else { return .skipped }
 
         onProgress(reportedSec, reportedSec, 0, "发送 play(3)...")
         do {
@@ -2409,14 +2553,25 @@ public final class MacAppState {
         while !Task.isCancelled {
             let remainingVideoSec = max(1, clipEnd - reportedSec)
             let stepRealSec = min(intervalSec, max(1, Int(ceil(Double(remainingVideoSec) / legalRate))))
-            let segmentStart = Date()
+            var activeElapsed: Double = 0
+            var lastTickAt = Date()
 
             while !Task.isCancelled {
-                let elapsed = Date().timeIntervalSince(segmentStart)
-                let remain = Int(ceil(Double(stepRealSec) - elapsed))
-                let smoothPos = min(clipEnd, reportedSec + Int(floor(elapsed * legalRate)))
+                let now = Date()
+                let delta = max(0, min(2.0, now.timeIntervalSince(lastTickAt)))
+                lastTickAt = now
+                let buffering = isCurrentlyBuffering()
+                if !buffering {
+                    activeElapsed += delta
+                }
+                let remain = Int(ceil(Double(stepRealSec) - activeElapsed))
+                let smoothPos = min(clipEnd, reportedSec + Int(floor(activeElapsed * legalRate)))
                 if remain <= 0 { break }
-                onProgress(smoothPos, reportedSec, remain, "运行中 (\(Int(legalRate))x) · \(smoothPos)/\(clipEnd)s")
+                if buffering {
+                    onProgress(smoothPos, reportedSec, remain, "缓冲中，暂停计时...")
+                } else {
+                    onProgress(smoothPos, reportedSec, remain, "运行中 (\(Int(legalRate))x) · \(smoothPos)/\(clipEnd)s")
+                }
                 do {
                     try await Task.sleep(for: .milliseconds(500))
                 } catch {
@@ -2425,8 +2580,7 @@ public final class MacAppState {
             }
             if Task.isCancelled { return .skipped }
 
-            let actualElapsed = Date().timeIntervalSince(segmentStart)
-            let advance = max(1, Int(floor(actualElapsed * legalRate)))
+            let advance = max(1, Int(floor(activeElapsed * legalRate)))
             let nextReportedSec = min(clipEnd, reportedSec + advance)
             let event: ChaoxingVideoDragEvent = nextReportedSec >= clipEnd ? .ended : .playing
 

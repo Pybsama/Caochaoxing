@@ -18,6 +18,7 @@ body:
       options:
         - Android
         - macOS
+        - Windows
         - iOS
         - iPadOS
     validations:

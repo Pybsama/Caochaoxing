@@ -3,18 +3,20 @@
 [![Release](https://img.shields.io/github/v/release/Pybsama/Caochaoxing?label=Release&color=2563eb)](https://github.com/Pybsama/Caochaoxing/releases/latest)
 [![Android CI](https://github.com/Pybsama/Caochaoxing/actions/workflows/android-ci.yml/badge.svg)](https://github.com/Pybsama/Caochaoxing/actions/workflows/android-ci.yml)
 [![Swift CI](https://github.com/Pybsama/Caochaoxing/actions/workflows/swift-ci.yml/badge.svg)](https://github.com/Pybsama/Caochaoxing/actions/workflows/swift-ci.yml)
+[![Windows CI](https://github.com/Pybsama/Caochaoxing/actions/workflows/windows-ci.yml/badge.svg)](https://github.com/Pybsama/Caochaoxing/actions/workflows/windows-ci.yml)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-orange.svg)](LICENSE)
-![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20iOS%20%7C%20iPadOS%20%7C%20Android-2ea44f)
+![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20Windows%20%7C%20iOS%20%7C%20iPadOS%20%7C%20Android-2ea44f)
 
-> **快速下载**：前往 [**GitHub Releases**](https://github.com/Pybsama/Caochaoxing/releases/latest) 直接获取 **Android 安装包（APK）** 与 **macOS（Apple Silicon `.app.zip`）**；iOS / iPadOS 目前可通过 Xcode 自行签名安装，后续计划开放 TestFlight。
+> **快速下载**：前往 [**GitHub Releases**](https://github.com/Pybsama/Caochaoxing/releases/latest) 直接获取 **macOS（Apple Silicon `.app.zip`）**、**Windows（便携 ZIP / `.msi` 安装包）** 与 **Android（APK）**；iOS / iPadOS 目前可通过 Xcode 自行签名安装，后续计划开放 TestFlight。
 
 ![项目封面：蓝色短发的动画角色站在咖啡机前](docs/artwork/project-cover.jpg)
 
-Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学习通客户端。你可以用自己的账号查看课程、群聊、课堂签到活动和章节任务点。Apple 两端提供课程视频和直播回放的内嵌播放器。Android 可查看任务进度，也可从有原网页链接的回放进入浏览器。
+Caochaoxing 是一个面向 **macOS、Windows、iOS / iPadOS 和 Android** 的非官方学习通客户端。你可以用自己的账号查看课程、群聊、课堂签到活动和章节任务点。Apple 两端提供课程视频和直播回放的内嵌播放器（macOS 还内置免重新登录网页视图可直接作答章节测验）；Windows 与 Android 可查看任务进度、多路合法同步看课并按需在浏览器打开回放原网页。
 
 > **代签功能尚未经过大范围测试，实际考勤效果仍待验证。** 如果遇到问题，欢迎在本仓库的 **Issues → New issue** 反馈。请写明设备、版本、操作步骤及预期和实际结果，并隐去账号、Cookie、课堂二维码等个人信息。详见[反馈与贡献](#反馈与贡献)。
 
-- **macOS 桌面端（`CaochaoxingMac`）**：原生 Swift 6 / SwiftUI 桌面应用，支持多账号快捷切换（顶栏菜单、侧边栏、设置页、`⌥⌘1..9` 快捷键）、完整 5 类签到/签退/独立扫码/本地滑块与底库人脸核验，以及内嵌视频播放器与多路合法同步看课引擎（默认仅看当前选中课程，支持可选开启跨课程自动匹配）。
+- **macOS 桌面端（`CaochaoxingMac`）**：原生 Swift 6 / SwiftUI 暖白纸感极简界面，支持多账号快捷切换气泡面板与 `⌥⌘1..9` 快捷键、完整 5 类签到/签退/独立扫码/本地滑块与底库人脸核验、**内置免重新登录测验网页视图**（`WKWebView`，自动注入当前账号 Cookie，关页自动刷新任务点状态），以及内嵌视频播放器与 **1/2/3/5/8/10 路并发同步看课引擎**（默认 5 路、严格等待画面加载缓冲完成后再开始自动刷课、中途缓冲自动暂停计时、支持跨课程续看与文档自动完成）。
+- **Windows 桌面端（`windows/`）**：基于 Kotlin 2.0.21 / Compose Multiplatform for Desktop（Material 3）并直接复用 `android/core` 纯 JVM 协议库，100% 纯开源依赖；使用 Windows 原生 DPAPI 加密持久化会话（`state.dpapi`）与 `SetThreadExecutionState` 防息屏，提供三栏课程看课、5 类签到/签退、本地图片与剪贴板二维码识别以及 `<canvas>` 围栏选点。
 - **iOS / iPadOS 端（`CaochaoxingIOS`）**：使用 Swift 6 / SwiftUI 与本地 Swift Package `ChaoxingCore`，支持 **iPadOS 双栏 `NavigationSplitView` 与多列并行视频网格**、顶栏多账号快捷切换菜单、完整 5 类签到工作台，以及与 macOS / Android 对齐的「课程看课」分栏（支持 1/2/3/5 路并发、普通视频/音频、`zhibo.chaoxing.com` 外站直播回放并行播放与 HLS→MP4 自动回退、PDF/文档一键完成、全屏视频预览、403 自动限流降级与防息屏）。
 - **Android 端（`android/`）**：使用 Kotlin 2.0.21 / Jetpack Compose（Material 3）与纯 JVM 核心模块 `:core`（`com.caochaoxing.core`）。提供签到工作台、课程章节和多任务进度面板。回放原网页通过浏览器打开。地图使用开放数据，扫码使用 CameraX 和 ZXing。
 
@@ -45,7 +47,8 @@ Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学
 | --- | --- |
 | iOS / iPadOS | Xcode 26.3 完成通用模拟器 Release 编译、链接及资源打包，并在全新的 iPhone 17 模拟器启动至登录页。此前的授权账号登录及课程、活动读取见 [iOS 验证记录](docs/VALIDATION.md)。 |
 | Android | 90 项单元测试通过，Debug 和未签名 Release APK 均构建成功。Lint 有 12 个警告、0 个错误。API 35 模拟器通过 6 项设备测试，覆盖活动详情与重试、三种活动状态、系统存储和密码表单重建。模拟活动提交次数为 0。[活动导航测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/SimulatedActivityNavigationTest.kt) · [密码表单测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/PasswordRecreationTest.kt) · [此前的授权账号验证](docs/ANDROID_UI_VALIDATION.md) |
-| macOS / Swift Package | 122 项 Swift 测试通过，覆盖共享库、iOS 状态控制器和 macOS 账号操作。macOS Release 可执行文件构建及本地签名校验通过。回放测试使用模拟响应，本轮未核对线上学习记录。[macOS 回归测试](Tests/CaochaoxingMacTests/MacAppStateRegressionTests.swift) |
+| macOS / Swift Package | 126 项 Swift 测试通过，覆盖共享库、测验直达链接解析、iOS 状态控制器以及 macOS 账号切换/并发缓冲等待/Cookie 隔离回归。macOS Release 构建及本地签名校验通过。[macOS 回归测试](Tests/CaochaoxingMacTests/MacAppStateRegressionTests.swift) |
+| Windows 桌面端 | 复用 `android/core` 并在 `windows/` 下运行 `:core:test` 与 `:app:test`（含 DPAPI 存储、状态流转、看课控制器与 UI 渲染冒烟测试），并由 GitHub Actions `windows-latest` 自动构建便携版 ZIP 与 `.msi` 安装包。 |
 
 欢迎在自己的设备上试用，并通过 GitHub Issues 反馈成功或失败的结果。如果希望验证提交后的记录，请使用由教师或管理员明确授权、与正式考勤隔离的测试班级和测试账号，并请组织者核对后台记录。
 
@@ -177,6 +180,37 @@ Apple 文档：[安装 Xcode 组件](https://developer.apple.com/documentation/x
 
 上述 JVM 测试使用 `OkHttp MockWebServer`、合成账号与内存/临时目录依赖，不涉及真实登录或线上签到请求。连接专用测试模拟器后，可运行 `./android/gradlew -p android :app:connectedDebugAndroidTest`，验证真实 Keystore、文件迁移/损坏恢复和未登录 Activity 生命周期。APK 位于 `android/app/build/outputs/apk/debug/app-debug.apk`；这是开发签名的测试包。线上登录、课程与真实签到的 Android 验收边界见验证记录。
 
+---
+
+### Windows 桌面端（`windows/`）
+
+| 项目 | 要求 |
+| --- | --- |
+| 目标系统 | Windows 10 / 11（x64） |
+| 开发工具 | IntelliJ IDEA 或独立 Gradle CLI（内置 Gradle `8.10.2` Wrapper） |
+| 运行与构建 | Kotlin `2.0.21`、Compose Multiplatform `1.7.1`、JDK `17` 或 `21`（编译目标字节码 `JVM 17`；打包 `.msi` 需要 Windows 上的 WiX Toolset） |
+| 协议核心 | 通过 `windows/settings.gradle.kts` 直接复用 `android/core` 纯 JVM 核心库 |
+
+#### Windows 构建、测试与打包方式
+
+在仓库根目录执行（Windows PowerShell / CMD 使用 `windows\gradlew.bat`，macOS / Linux 开发验证使用 `./windows/gradlew`）：
+
+```powershell
+# 运行 :core 与 Windows 桌面端全部 JVM 单元测试
+.\windows\gradlew.bat -p windows :core:test :app:test
+
+# 直接在本地启动桌面客户端
+.\windows\gradlew.bat -p windows :app:run
+
+# 构建免安装便携版目录（自带裁剪 JRE，开箱即用，输出位于 windows\app\build\compose\binaries\main\app\）
+.\windows\gradlew.bat -p windows :app:createDistributable
+
+# 构建 Windows MSI 安装包（免管理员权限单用户安装，输出位于 windows\app\build\compose\binaries\main\msi\）
+.\windows\gradlew.bat -p windows :app:packageMsi
+```
+
+仓库已配置 [.github/workflows/windows-ci.yml](.github/workflows/windows-ci.yml)，在 `windows-latest` 上使用 Temurin JDK `21` 与 Gradle `8.10.2` 自动运行 `:core:test`、`:app:test`，并打包上传 `Caochaoxing-windows-portable`（便携 ZIP）与 `Caochaoxing-windows-msi`（MSI 安装包）产物。
+
 ## 项目结构
 
 ```text
@@ -200,8 +234,15 @@ android/
   gradlew / gradlew.bat                 macOS / Linux 与 Windows 构建入口
   core/                                纯 JVM Kotlin 核心库（模型、OkHttp、加解密、签到与课程看课协议服务、坐标转换、测试）
   app/                                 Android Jetpack Compose 应用（签到工作台、课程看课引擎、AES-GCM 存储、CameraX、WebView Leaflet）
+windows/
+  build.gradle.kts / settings.gradle.kts Windows 根工程配置（直接复用 ../android/core）
+  gradle/libs.versions.toml            Kotlin / Compose Multiplatform / OkHttp / ZXing / JNA / JUnit 5 依赖目录
+  gradlew / gradlew.bat                macOS / Linux 与 Windows 构建入口
+  app/                                 Windows Compose Desktop 应用（DPAPI 加密存储、防息屏、三栏看课、5 类签到与 Canvas 围栏、打包配置与测试）
 .github/workflows/
   android-ci.yml                       Android 单元测试与 Debug APK 自动构建工作流
+  swift-ci.yml                         Swift 单元测试与 macOS Release 构建工作流
+  windows-ci.yml                       Windows 单元测试、便携版 ZIP 与 MSI 安装包自动构建工作流
 README.md                              使用、构建、权限与风险说明
 LICENSE                                AGPL v3 完整协议文本
 THIRD_PARTY_NOTICES.md                 上游出处、版权声明、双端改写范围与开源依赖列表

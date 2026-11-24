@@ -608,15 +608,19 @@ public enum ChaoxingAttachmentKind: String, Codable, Sendable, Hashable {
 
 /// Non-video (or general) task point parsed from `knowledge/cards` `mArg`.
 public struct ChaoxingChapterAttachment: Codable, Sendable, Hashable, Identifiable {
-    public var id: String { "\(chapterId)_\(kind.rawValue)_\(jobid)_\(objectId)_\(name)" }
+    public var id: String { "\(chapterId)_\(kind.rawValue)_\(jobid)_\(objectId)_\(workId)_\(name)" }
 
     public let kind: ChaoxingAttachmentKind
     public let courseId: Int64
     public let classId: Int
     public let chapterId: String
+    public let cpi: Int64
     public let jobid: String
     public let objectId: String
     public let jtoken: String
+    public let workId: String
+    public let workEnc: String
+    public let ktoken: String
     public let name: String
     public let isJob: Bool
     public let isPassed: Bool
@@ -627,9 +631,13 @@ public struct ChaoxingChapterAttachment: Codable, Sendable, Hashable, Identifiab
         courseId: Int64,
         classId: Int,
         chapterId: String,
+        cpi: Int64 = 0,
         jobid: String,
         objectId: String = "",
         jtoken: String = "",
+        workId: String = "",
+        workEnc: String = "",
+        ktoken: String = "",
         name: String,
         isJob: Bool = true,
         isPassed: Bool = false,
@@ -639,9 +647,13 @@ public struct ChaoxingChapterAttachment: Codable, Sendable, Hashable, Identifiab
         self.courseId = courseId
         self.classId = classId
         self.chapterId = chapterId
+        self.cpi = cpi
         self.jobid = jobid
         self.objectId = objectId
         self.jtoken = jtoken
+        self.workId = workId
+        self.workEnc = workEnc
+        self.ktoken = ktoken
         self.name = name
         self.isJob = isJob
         self.isPassed = isPassed
@@ -653,15 +665,76 @@ public struct ChaoxingChapterAttachment: Codable, Sendable, Hashable, Identifiab
         kind == .document && isJob && !isPassed && !jobid.isEmpty && !jtoken.isEmpty
     }
 
+    /// Direct Chaoxing work/quiz page URL when `workId` is available from `mArg`.
+    public var directQuizURL: URL? {
+        guard kind == .quiz, !workId.isEmpty else { return nil }
+        var comps = URLComponents(string: "https://mooc1.chaoxing.com/mooc-ans/api/work")
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "api", value: "1"),
+            URLQueryItem(name: "workId", value: workId),
+            URLQueryItem(name: "jobid", value: jobid),
+            URLQueryItem(name: "needRedirect", value: "true"),
+            URLQueryItem(name: "knowledgeid", value: chapterId),
+            URLQueryItem(name: "ut", value: "s"),
+            URLQueryItem(name: "clazzId", value: String(classId)),
+            URLQueryItem(name: "type", value: ""),
+            URLQueryItem(name: "enc", value: workEnc),
+            URLQueryItem(name: "courseid", value: String(courseId))
+        ]
+        if cpi > 0 {
+            items.append(URLQueryItem(name: "cpi", value: String(cpi)))
+        }
+        if !ktoken.isEmpty {
+            items.append(URLQueryItem(name: "ktoken", value: ktoken))
+        }
+        comps?.queryItems = items
+        return comps?.url
+    }
+
+    /// Full Chaoxing chapter study page URL (hosts quizzes, discussions, and attachments natively).
+    public var chapterStudyURL: URL? {
+        var comps = URLComponents(string: "https://mooc1.chaoxing.com/mycourse/studentstudy")
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "chapterId", value: chapterId),
+            URLQueryItem(name: "courseId", value: String(courseId)),
+            URLQueryItem(name: "clazzid", value: String(classId)),
+            URLQueryItem(name: "mooc2", value: "1")
+        ]
+        if cpi > 0 {
+            items.append(URLQueryItem(name: "cpi", value: String(cpi)))
+        }
+        comps?.queryItems = items
+        return comps?.url
+    }
+
+    /// Preferred URL to open inside an authenticated in-app WebView.
+    public var preferredInAppURL: URL? {
+        if kind == .quiz {
+            return directQuizURL ?? chapterStudyURL
+        }
+        if let raw = externalURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty,
+           let url = URL(string: raw),
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            return url
+        }
+        return chapterStudyURL
+    }
+
     public func updating(isPassed: Bool) -> ChaoxingChapterAttachment {
         ChaoxingChapterAttachment(
             kind: kind,
             courseId: courseId,
             classId: classId,
             chapterId: chapterId,
+            cpi: cpi,
             jobid: jobid,
             objectId: objectId,
             jtoken: jtoken,
+            workId: workId,
+            workEnc: workEnc,
+            ktoken: ktoken,
             name: name,
             isJob: isJob,
             isPassed: isPassed,

@@ -913,6 +913,9 @@ public enum ChaoxingCourseStudyService {
             case .video, .other: fallbackName = "学习任务点"
             }
             let jtoken = (item["jtoken"] as? String) ?? ""
+            let workId = stringValue(property["workid"]) ?? stringValue(item["workid"]) ?? ""
+            let workEnc = (item["enc"] as? String) ?? (property["enc"] as? String) ?? ""
+            let ktoken = stringValue(defaults["ktoken"]) ?? ""
             let externalURL = (property["url"] as? String)
                 ?? (property["href"] as? String)
                 ?? (property["link"] as? String)
@@ -933,9 +936,13 @@ public enum ChaoxingCourseStudyService {
                     courseId: courseId,
                     classId: classId,
                     chapterId: chapterId,
+                    cpi: cpi,
                     jobid: jobid,
                     objectId: objectId,
                     jtoken: jtoken,
+                    workId: workId,
+                    workEnc: workEnc,
+                    ktoken: ktoken,
                     name: rawName.isEmpty ? fallbackName : rawName,
                     isJob: isJob,
                     isPassed: effectiveOtherPassed,

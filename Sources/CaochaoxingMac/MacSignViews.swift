@@ -13,6 +13,8 @@ private struct MacSignSheetPayload: Identifiable {
     let initialQRRaw: String
 }
 
+// MARK: - Sign Workspace
+
 struct MacSignWorkspaceView: View {
     @Environment(MacAppState.self) private var appState
     @State private var searchText = ""
@@ -34,41 +36,14 @@ struct MacSignWorkspaceView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                Section("雷达扫描与快捷入口") {
-                    radarHeaderRow
-                    if let message = appState.radarScanMessage {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(appState.radarFailedCourses > 0 ? CxPalette.cinnabar : .secondary)
-                    }
-                    Button {
-                        showStandaloneQRSheet = true
-                    } label: {
-                        Label("独立扫码签到（粘贴链接 / 识别二维码图片）", systemImage: "qrcode.viewfinder")
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-
-                    ForEach(appState.pendingRadarActivities) { act in
-                        radarActivityRow(act)
-                    }
-                }
-
-                Section("我的课程 (\(sortedCourses.count))") {
-                    ForEach(sortedCourses) { course in
-                        courseRow(course)
-                    }
-                }
-            }
-            .searchable(text: $searchText, prompt: "搜索课程")
-            .navigationSplitViewColumnWidth(min: 260, ideal: 310, max: 380)
-        } detail: {
+        HStack(spacing: 0) {
+            signSidebarColumn
+            MacDivider(vertical: true)
             courseDetailPane
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(MacTheme.canvas)
         }
+        .background(MacTheme.canvas)
         .sheet(item: $activeSignSheet) { payload in
             MacSignActionSheet(activity: payload.activity, initialQRRaw: payload.initialQRRaw)
         }
@@ -80,67 +55,137 @@ struct MacSignWorkspaceView: View {
         }
     }
 
-    private var radarHeaderRow: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("待签活动雷达")
-                    .font(.headline)
-                Text(appState.starredCourseIds.isEmpty ? "扫描前 12 门课程考勤" : "扫描已标星 \(appState.starredCourseIds.count) 门课程")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button {
-                appState.scanPendingActivities()
-            } label: {
-                if appState.isScanningRadar {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Label("扫描", systemImage: "waveform.path.ecg")
+    private var signSidebarColumn: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                MacSearchField(placeholder: "搜索课程", text: $searchText)
+
+                HStack(spacing: 6) {
+                    Button {
+                        appState.scanPendingActivities()
+                    } label: {
+                        HStack(spacing: 5) {
+                            if appState.isScanningRadar {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "waveform.path.ecg")
+                            }
+                            Text(appState.isScanningRadar ? "扫描中" : "扫待签")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(MacPrimaryButtonStyle(compact: true))
+                    .disabled(appState.isScanningRadar || appState.courses.isEmpty)
+
+                    Button {
+                        showStandaloneQRSheet = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "qrcode.viewfinder")
+                            Text("扫码签")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(MacSecondaryButtonStyle(compact: true))
+                }
+
+                if let message = appState.radarScanMessage {
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(appState.radarFailedCourses > 0 ? MacTheme.danger : MacTheme.inkSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(appState.isScanningRadar || appState.courses.isEmpty)
+            .padding(10)
+
+            MacDivider()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if !appState.pendingRadarActivities.isEmpty {
+                        Text("进行中 (\(appState.pendingRadarActivities.count))")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(MacTheme.amber)
+                            .padding(.horizontal, 10)
+                            .padding(.top, 6)
+                            .padding(.bottom, 2)
+
+                        ForEach(appState.pendingRadarActivities) { act in
+                            radarActivityRow(act)
+                        }
+
+                        MacDivider()
+                            .padding(.vertical, 6)
+                    }
+
+                    Text("课程 (\(sortedCourses.count))")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(MacTheme.inkTertiary)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+
+                    ForEach(sortedCourses) { course in
+                        courseRow(course)
+                    }
+                }
+                .padding(8)
+            }
+            .scrollContentBackground(.hidden)
         }
-        .padding(.vertical, 4)
+        .frame(width: 262)
+        .background(MacTheme.sidebar)
     }
 
     private func radarActivityRow(_ act: ChaoxingSignActivity) -> some View {
         Button {
             activeSignSheet = MacSignSheetPayload(activity: act, initialQRRaw: "")
         } label: {
-            HStack {
+            HStack(spacing: 8) {
                 Image(systemName: act.signType.systemImage)
-                    .foregroundStyle(CxPalette.amber)
+                    .font(.caption)
+                    .foregroundStyle(MacTheme.amber)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(act.courseName.isEmpty ? act.nameOne : "\(act.courseName) · \(act.nameOne)")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(MacTheme.ink)
                         .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                     Text(act.signType.displayName)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MacTheme.inkSecondary)
                 }
-                Spacer()
-                CxBadge("待签", tone: .amber, showDot: true)
+                Spacer(minLength: 4)
+                MacTag(text: "待签", color: MacTheme.amber)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MacTheme.amber.opacity(0.09), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
     private func courseRow(_ course: ChaoxingCourse) -> some View {
-        HStack {
+        let isSelected = appState.selectedSignCourse?.id == course.id
+        let isStarred = appState.starredCourseIds.contains(course.courseId)
+
+        return HStack(spacing: 6) {
             Button {
                 appState.loadActivities(for: course)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(course.courseName)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(appState.selectedSignCourse?.id == course.id ? CxPalette.accent : .primary)
+                        .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                        .foregroundStyle(MacTheme.ink)
                         .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                     if !course.teacherName.isEmpty {
                         Text(course.teacherName)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MacTheme.inkSecondary)
+                            .lineLimit(1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -151,24 +196,36 @@ struct MacSignWorkspaceView: View {
             Button {
                 Task { await appState.toggleStarCourse(course.courseId) }
             } label: {
-                Image(systemName: appState.starredCourseIds.contains(course.courseId) ? "star.fill" : "star")
-                    .foregroundStyle(appState.starredCourseIds.contains(course.courseId) ? CxPalette.amber : .secondary)
+                Image(systemName: isStarred ? "star.fill" : "star")
+                    .font(.caption)
+                    .foregroundStyle(isStarred ? MacTheme.amber : MacTheme.inkTertiary)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
+            .help(isStarred ? "取消标星" : "标星优先扫描")
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isSelected ? MacTheme.selection : Color.clear)
+        )
     }
 
     @ViewBuilder
     private var courseDetailPane: some View {
         if let course = appState.selectedSignCourse {
             VStack(alignment: .leading, spacing: 0) {
-                HStack {
+                HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(course.courseName)
-                            .font(.title3.weight(.semibold))
-                        Text(course.teacherName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.headline)
+                            .foregroundStyle(MacTheme.ink)
+                            .lineLimit(1)
+                        if !course.teacherName.isEmpty {
+                            Text(course.teacherName)
+                                .font(.caption)
+                                .foregroundStyle(MacTheme.inkSecondary)
+                        }
                     }
                     Spacer()
                     Button {
@@ -177,49 +234,73 @@ struct MacSignWorkspaceView: View {
                     } label: {
                         Label("去本课看课", systemImage: "play.circle")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(MacSecondaryButtonStyle(compact: true))
 
                     Button {
                         appState.loadActivities(for: course)
                     } label: {
-                        Label("刷新活动", systemImage: "arrow.clockwise")
+                        Label("刷新", systemImage: "arrow.clockwise")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(MacSecondaryButtonStyle(compact: true))
                 }
-                .padding(16)
-                Divider()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .background(MacTheme.canvas)
+
+                MacDivider()
 
                 if appState.isLoadingActivities {
-                    ProgressView("加载签到活动...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let err = appState.signErrorMessage, appState.courseActivities.isEmpty {
-                    ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(err))
-                } else if appState.courseActivities.isEmpty {
-                    ContentUnavailableView("暂无签到活动", systemImage: "checkmark.seal", description: Text("该课程当前没有记录到的签到任务"))
-                } else {
-                    List(appState.courseActivities) { act in
-                        MacActivityRow(activity: act) {
-                            activeSignSheet = MacSignSheetPayload(activity: act, initialQRRaw: "")
-                        }
+                    VStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("加载签到活动...")
+                            .font(.caption)
+                            .foregroundStyle(MacTheme.inkSecondary)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(MacTheme.canvas)
+                } else if let err = appState.signErrorMessage, appState.courseActivities.isEmpty {
+                    MacEmptyState(icon: "exclamationmark.triangle", title: "加载失败", subtitle: err)
+                } else if appState.courseActivities.isEmpty {
+                    MacEmptyState(icon: "checkmark.seal", title: "暂无签到活动", subtitle: "该课程当前没有记录到的签到任务")
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(appState.courseActivities) { act in
+                                MacActivityRow(activity: act) {
+                                    activeSignSheet = MacSignSheetPayload(activity: act, initialQRRaw: "")
+                                }
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .macCanvas()
                 }
             }
         } else {
-            ContentUnavailableView("选择课程或扫描待签", systemImage: "location.viewfinder", description: Text("点击左侧课程查看所有签到活动，或直接点击“扫描”快速定位进行中的考勤"))
+            MacEmptyState(
+                icon: "location.viewfinder",
+                title: "选择课程或扫描待签",
+                subtitle: "在左侧选择课程查看全部签到活动，或点「扫待签」快速查找进行中的考勤"
+            )
         }
     }
 }
+
+// MARK: - Group Sign Workspace
 
 struct MacGroupSignWorkspaceView: View {
     @Environment(MacAppState.self) private var appState
     @State private var activeSignSheet: ChaoxingSignActivity?
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             groupListColumn
-        } detail: {
+            MacDivider(vertical: true)
             groupDetailColumn
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(MacTheme.canvas)
         }
+        .background(MacTheme.canvas)
         .sheet(item: $activeSignSheet) { act in
             MacSignActionSheet(activity: act)
         }
@@ -230,7 +311,7 @@ struct MacGroupSignWorkspaceView: View {
             HStack {
                 Text("我的群聊 (\(appState.groups.count))")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MacTheme.inkSecondary)
                 Spacer()
                 Button {
                     Task { await appState.loadGroups() }
@@ -239,34 +320,63 @@ struct MacGroupSignWorkspaceView: View {
                         ProgressView().controlSize(.mini)
                     } else {
                         Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundStyle(MacTheme.inkSecondary)
                     }
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .disabled(appState.isLoadingGroups)
                 .help("刷新群聊")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
+            .padding(.vertical, 10)
 
-            List(appState.groups) { group in
-                Button {
-                    Task { await appState.loadGroupActivities(for: group) }
-                } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(group.name)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(appState.selectedGroup?.id == group.id ? CxPalette.accent : .primary)
-                        Text("群聊 ID: \(group.id)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 2)
+            MacDivider()
+
+            if appState.groups.isEmpty && !appState.isLoadingGroups {
+                VStack {
+                    Text("暂无群聊")
+                        .font(.caption)
+                        .foregroundStyle(MacTheme.inkTertiary)
                 }
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(appState.groups) { group in
+                            let isSelected = appState.selectedGroup?.id == group.id
+                            Button {
+                                Task { await appState.loadGroupActivities(for: group) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(group.name)
+                                        .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                                        .foregroundStyle(MacTheme.ink)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                    Text("ID \(group.id)")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(MacTheme.inkTertiary)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(isSelected ? MacTheme.selection : Color.clear)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(8)
+                }
+                .scrollContentBackground(.hidden)
             }
         }
-        .navigationSplitViewColumnWidth(min: 230, ideal: 280)
+        .frame(width: 248)
+        .background(MacTheme.sidebar)
         .task {
             if appState.groups.isEmpty {
                 await appState.loadGroups()
@@ -280,32 +390,52 @@ struct MacGroupSignWorkspaceView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text(group.name)
-                        .font(.title3.weight(.semibold))
+                        .font(.headline)
+                        .foregroundStyle(MacTheme.ink)
                     Spacer()
-                    Button("刷新活动") {
+                    Button {
                         Task { await appState.loadGroupActivities(for: group) }
+                    } label: {
+                        Label("刷新", systemImage: "arrow.clockwise")
                     }
+                    .buttonStyle(MacSecondaryButtonStyle(compact: true))
                 }
-                .padding(16)
-                Divider()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+
+                MacDivider()
+
                 if appState.isLoadingActivities {
-                    ProgressView("加载群聊活动...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if appState.groupActivities.isEmpty {
-                    ContentUnavailableView("暂无群聊签到", systemImage: "bubble.left")
-                } else {
-                    List(appState.groupActivities) { act in
-                        MacActivityRow(activity: act) {
-                            activeSignSheet = act
-                        }
+                    VStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("加载群聊活动...")
+                            .font(.caption)
+                            .foregroundStyle(MacTheme.inkSecondary)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if appState.groupActivities.isEmpty {
+                    MacEmptyState(icon: "bubble.left", title: "暂无群聊签到")
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(appState.groupActivities) { act in
+                                MacActivityRow(activity: act) {
+                                    activeSignSheet = act
+                                }
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .macCanvas()
                 }
             }
         } else {
-            ContentUnavailableView("选择一个群聊", systemImage: "bubble.left.and.bubble.right")
+            MacEmptyState(icon: "bubble.left.and.bubble.right", title: "选择一个群聊", subtitle: "在左侧点击群聊查看群内签到活动")
         }
     }
 }
+
+// MARK: - Settings Workspace
 
 struct MacSettingsWorkspaceView: View {
     @Environment(MacAppState.self) private var appState
@@ -318,91 +448,83 @@ struct MacSettingsWorkspaceView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                presetDefaultsBox
+            VStack(alignment: .leading, spacing: 20) {
                 accountsBox
+                presetDefaultsBox
                 locationPresetsBox
                 historyBox
             }
-            .padding(20)
+            .frame(maxWidth: 740, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity)
         }
-    }
-
-    private var presetDefaultsBox: some View {
-        GroupBox("全部一键默认预设（已配好）") {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Picker("默认挂机并发路数", selection: Bindable(appState).maxConcurrentWatches) {
-                        Text("1 路").tag(1)
-                        Text("2 路").tag(2)
-                        Text("3 路 (推荐)").tag(3)
-                        Text("5 路").tag(5)
-                    }
-                    .frame(maxWidth: 260)
-                    Spacer()
-                }
-                Toggle("单视频通过后自动连播下一节", isOn: Bindable(appState).autoAdvanceNextChapter)
-                Toggle("同时看时自动匹配并续看其他课程（关闭则仅看当前选中课程）", isOn: Bindable(appState).watchAllCoursesAutomatically)
-                Toggle("同时看时顺便自动完成 PDF/文档任务点", isOn: Bindable(appState).autoCompleteDocuments)
-                Toggle("位置签到启用随机坐标防风控微调", isOn: Binding(
-                    get: { appState.enableLocationJitter },
-                    set: { appState.setEnableLocationJitter($0) }
-                ))
-                Toggle("打开应用登录后自动开始同时看（同步播放）", isOn: Bindable(appState).autoStartOnLaunch)
-            }
-            .padding(8)
-        }
+        .macCanvas()
     }
 
     private var accountsBox: some View {
-        GroupBox("多账号灵活切换与管理（已保存 \(appState.accounts.count) 个 · 支持代签）") {
-            VStack(alignment: .leading, spacing: 10) {
+        MacSectionBox("账号切换与管理", subtitle: "已保存 \(appState.accounts.count) 个 · 点击账号即可切换，支持 ⌥⌘1..9") {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(appState.accounts.enumerated()), id: \.element.id) { index, acc in
                     let isActive = acc.phoneNumber == appState.activeAccount?.phoneNumber
                     let isRefreshing = appState.refreshingAccountPhones.contains(acc.phoneNumber)
                     let remark = appState.accountRemark(for: acc)
 
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 10) {
-                            Image(systemName: isActive ? "checkmark.circle.fill" : "person.circle")
-                                .font(.title3)
-                                .foregroundStyle(isActive ? CxPalette.sage : .secondary)
+                            Button {
+                                guard !isActive else { return }
+                                Task { await appState.switchAccount(acc) }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Circle()
+                                        .fill(isActive ? MacTheme.sage.opacity(0.14) : MacTheme.surfaceSecondary)
+                                        .frame(width: 32, height: 32)
+                                        .overlay(
+                                            Text(String(appState.accountDisplayTitle(for: acc).prefix(1)))
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(isActive ? MacTheme.sage : MacTheme.inkSecondary)
+                                        )
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(acc.name.isEmpty ? acc.phoneNumber : acc.name)
-                                        .font(.subheadline.weight(.semibold))
-                                    if !remark.isEmpty {
-                                        CxBadge(remark, tone: .accent)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Text(acc.name.isEmpty ? acc.phoneNumber : acc.name)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundStyle(MacTheme.ink)
+                                            if !remark.isEmpty {
+                                                MacTag(text: remark, color: MacTheme.accent)
+                                            }
+                                            if isActive {
+                                                MacTag(text: "当前使用", color: MacTheme.sage)
+                                            }
+                                            if index < 9 {
+                                                Text("⌥⌘\(index + 1)")
+                                                    .font(.system(size: 10, design: .monospaced))
+                                                    .foregroundStyle(MacTheme.inkTertiary)
+                                            }
+                                        }
+                                        HStack(spacing: 6) {
+                                            Text(acc.phoneNumber)
+                                            if let school = acc.schools.first?.name, !school.isEmpty {
+                                                Text("· \(school)")
+                                            }
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(MacTheme.inkSecondary)
                                     }
-                                    if isActive {
-                                        CxBadge("当前使用", tone: .sage, showDot: true)
-                                    }
-                                    if index < 9 {
-                                        Text("⌥⌘\(index + 1)")
-                                            .font(CxTypography.mono(10))
-                                            .foregroundStyle(.secondary)
-                                    }
+
+                                    Spacer(minLength: 8)
                                 }
-                                HStack(spacing: 8) {
-                                    Text(acc.phoneNumber)
-                                    if let school = acc.schools.first?.name, !school.isEmpty {
-                                        Text("· \(school)")
-                                    }
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .contentShape(Rectangle())
                             }
-
-                            Spacer()
+                            .buttonStyle(.plain)
+                            .disabled(isActive || appState.isSwitchingAccount)
 
                             if !isActive {
-                                Button("切换使用") {
+                                Button("切换") {
                                     Task { await appState.switchAccount(acc) }
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .tint(CxPalette.accent)
-                                .controlSize(.small)
+                                .buttonStyle(MacPrimaryButtonStyle(compact: true))
                                 .disabled(appState.isSwitchingAccount)
                             }
 
@@ -414,40 +536,36 @@ struct MacSettingsWorkspaceView: View {
                                     remarkDraft = remark
                                 }
                             } label: {
-                                Image(systemName: "tag")
+                                Text("备注")
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .help("设置/修改账号备注标签")
+                            .buttonStyle(MacSecondaryButtonStyle(compact: true))
 
                             Button {
                                 Task { await appState.refreshAccountSession(acc) }
                             } label: {
                                 if isRefreshing {
-                                    ProgressView().controlSize(.mini)
+                                    ProgressView().controlSize(.mini).frame(width: 14, height: 14)
                                 } else {
                                     Image(systemName: "arrow.clockwise")
                                 }
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                            .buttonStyle(MacSecondaryButtonStyle(compact: true))
                             .disabled(isRefreshing)
-                            .help("重新登录刷新该账号 Cookie 会话")
+                            .help("刷新会话")
 
-                            Button(role: .destructive) {
+                            Button {
                                 Task { await appState.removeAccount(acc) }
                             } label: {
                                 Image(systemName: "trash")
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .help(isActive ? "退出并移除当前账号" : "移除该备用账号")
+                            .buttonStyle(MacSecondaryButtonStyle(compact: true, isDestructive: true))
+                            .help(isActive ? "退出并移除当前账号" : "移除账号")
                         }
 
                         if editingRemarkPhone == acc.phoneNumber {
                             HStack(spacing: 8) {
-                                TextField("输入备注标签（如 本人 / 小号 / 室友，留空则清除）", text: $remarkDraft)
-                                    .textFieldStyle(.roundedBorder)
+                                TextField("备注（如 本人 / 室友，留空清除）", text: $remarkDraft)
+                                    .macInputField()
                                     .onSubmit {
                                         let draft = remarkDraft
                                         editingRemarkPhone = nil
@@ -458,21 +576,19 @@ struct MacSettingsWorkspaceView: View {
                                     editingRemarkPhone = nil
                                     Task { await appState.updateAccountRemark(phoneNumber: acc.phoneNumber, remark: draft) }
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
+                                .buttonStyle(MacPrimaryButtonStyle(compact: true))
                                 Button("取消") {
                                     editingRemarkPhone = nil
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
+                                .buttonStyle(MacSecondaryButtonStyle(compact: true))
                             }
-                            .padding(.leading, 30)
+                            .padding(.leading, 42)
                         }
                     }
-                    .padding(8)
+                    .padding(10)
                     .background(
-                        isActive ? CxPalette.sage.opacity(0.08) : CxPalette.surfaceSecondary.opacity(0.6),
-                        in: RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(isActive ? MacTheme.selection : MacTheme.sidebar)
                     )
                 }
 
@@ -483,60 +599,125 @@ struct MacSettingsWorkspaceView: View {
                     } label: {
                         Label("添加新账号", systemImage: "person.badge.plus")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(MacPrimaryButtonStyle(compact: true))
 
                     if appState.accounts.count > 1 {
                         Button {
                             Task { await appState.switchToNextAccount() }
                         } label: {
-                            Label("切换下一个账号 (⌥⌘N)", systemImage: "arrow.triangle.2.circlepath")
+                            Label("切换下一个 (⌥⌘N)", systemImage: "arrow.triangle.2.circlepath")
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(MacSecondaryButtonStyle(compact: true))
                         .disabled(appState.isSwitchingAccount)
                     }
 
                     Spacer()
-
-                    Text("顶部工具栏与菜单栏「账号」均可随时一键切换")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
+                .padding(.top, 4)
             }
-            .padding(8)
         }
     }
 
-    private var locationPresetsBox: some View {
-        GroupBox("常用签到位置预设") {
-            VStack(alignment: .leading, spacing: 10) {
-                if appState.locationPresets.isEmpty {
-                    Text("尚未添加位置预设").font(.caption).foregroundStyle(.secondary)
-                } else {
-                    ForEach(appState.locationPresets) { preset in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(preset.name).font(.subheadline.weight(.semibold))
-                                Text("\(preset.address) (\(String(format: "%.6f, %.6f", preset.latitude, preset.longitude)))")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+    private var presetDefaultsBox: some View {
+        MacSectionBox("默认选项") {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack {
+                    Text("默认并发路数")
+                        .font(.subheadline)
+                        .foregroundStyle(MacTheme.ink)
+                    Spacer()
+                    HStack(spacing: 4) {
+                        ForEach([1, 2, 3, 5, 8, 10], id: \.self) { count in
+                            let selected = appState.maxConcurrentWatches == count
+                            Button("\(count) 路") {
+                                appState.maxConcurrentWatches = count
                             }
-                            Spacer()
-                            Button(role: .destructive) {
-                                Task { await appState.deleteLocationPreset(preset.id) }
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
+                            .font(.caption.weight(selected ? .semibold : .regular))
+                            .foregroundStyle(selected ? MacTheme.accent : MacTheme.inkSecondary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4.5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(selected ? MacTheme.accent.opacity(0.12) : MacTheme.sidebar)
+                            )
+                            .buttonStyle(.plain)
                         }
                     }
                 }
 
-                Divider()
+                MacDivider()
+                settingToggleRow("单视频通过后自动连播下一节", isOn: Bindable(appState).autoAdvanceNextChapter)
+                MacDivider()
+                settingToggleRow("同时看时自动匹配并续看其他课程", isOn: Bindable(appState).watchAllCoursesAutomatically)
+                MacDivider()
+                settingToggleRow("同时看时顺便完成 PDF / 文档任务点", isOn: Bindable(appState).autoCompleteDocuments)
+                MacDivider()
+                settingToggleRow("位置签到启用轻微随机坐标偏移", isOn: Binding(
+                    get: { appState.enableLocationJitter },
+                    set: { appState.setEnableLocationJitter($0) }
+                ))
+                MacDivider()
+                settingToggleRow("打开应用并恢复登录后自动开始同时看", isOn: Bindable(appState).autoStartOnLaunch)
+            }
+        }
+    }
+
+    private func settingToggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(MacTheme.ink)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.small)
+    }
+
+    private var locationPresetsBox: some View {
+        MacSectionBox("常用签到位置") {
+            VStack(alignment: .leading, spacing: 10) {
+                if appState.locationPresets.isEmpty {
+                    Text("尚未添加位置预设")
+                        .font(.caption)
+                        .foregroundStyle(MacTheme.inkTertiary)
+                } else {
+                    ForEach(Array(appState.locationPresets.enumerated()), id: \.element.id) { idx, preset in
+                        if idx > 0 { MacDivider() }
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preset.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(MacTheme.ink)
+                                Text("\(preset.address) · \(String(format: "%.6f, %.6f", preset.latitude, preset.longitude))")
+                                    .font(.caption2)
+                                    .foregroundStyle(MacTheme.inkSecondary)
+                            }
+                            Spacer()
+                            Button {
+                                Task { await appState.deleteLocationPreset(preset.id) }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundStyle(MacTheme.inkSecondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
+                MacDivider()
+
                 HStack(spacing: 8) {
-                    TextField("名称(如 教学楼)", text: $presetName)
-                    TextField("详细地址", text: $presetAddress)
-                    TextField("纬度 lat", text: $presetLat).frame(width: 110)
-                    TextField("经度 lng", text: $presetLng).frame(width: 110)
+                    TextField("名称（如 教学楼）", text: $presetName)
+                        .macInputField()
+                    TextField("地址", text: $presetAddress)
+                        .macInputField()
+                    TextField("纬度", text: $presetLat)
+                        .macInputField()
+                        .frame(width: 96)
+                    TextField("经度", text: $presetLng)
+                        .macInputField()
+                        .frame(width: 96)
                     Button("添加") {
                         guard let lat = Double(presetLat), let lng = Double(presetLng), !presetName.isEmpty else { return }
                         let addr = presetAddress.isEmpty ? presetName : presetAddress
@@ -545,40 +726,45 @@ struct MacSettingsWorkspaceView: View {
                             presetName = ""; presetAddress = ""; presetLat = ""; presetLng = ""
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(MacPrimaryButtonStyle(compact: true))
                 }
             }
-            .padding(8)
         }
     }
 
     private var historyBox: some View {
-        GroupBox("最近签到记录 (\(appState.signHistory.count))") {
+        MacSectionBox("最近签到记录", subtitle: "\(appState.signHistory.count) 条") {
             VStack(alignment: .leading, spacing: 8) {
                 if appState.signHistory.isEmpty {
-                    Text("暂无签到记录").font(.caption).foregroundStyle(.secondary)
+                    Text("暂无签到记录")
+                        .font(.caption)
+                        .foregroundStyle(MacTheme.inkTertiary)
                 } else {
-                    ForEach(appState.signHistory.prefix(15)) { item in
+                    ForEach(Array(appState.signHistory.prefix(15).enumerated()), id: \.element.id) { idx, item in
+                        if idx > 0 { MacDivider() }
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("\(item.courseName.isEmpty ? "活动" : item.courseName) · \(item.activityName)")
                                     .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(MacTheme.ink)
                                 Text(item.summary)
                                     .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(MacTheme.inkSecondary)
                             }
                             Spacer()
                             Text(item.displayCounts)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(MacTheme.inkSecondary)
                         }
+                        .padding(.vertical, 2)
                     }
                 }
             }
-            .padding(8)
         }
     }
 }
+
+// MARK: - Activity Row
 
 private struct MacActivityRow: View {
     let activity: ChaoxingSignActivity
@@ -587,30 +773,37 @@ private struct MacActivityRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: activity.signType.systemImage)
-                .font(.title3)
-                .foregroundStyle(activity.isAvailable ? CxPalette.accent : .secondary)
-                .frame(width: 28)
+                .font(.subheadline)
+                .foregroundStyle(activity.isAvailable ? MacTheme.accent : MacTheme.inkTertiary)
+                .frame(width: 30, height: 30)
+                .background(
+                    (activity.isAvailable ? MacTheme.accent : MacTheme.inkTertiary).opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(activity.nameOne)
-                    .font(.subheadline.weight(.semibold))
-                Text("\(activity.signType.displayName) · 活动 ID: \(activity.id)")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(MacTheme.ink)
+                Text("\(activity.signType.displayName) · #\(activity.id)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MacTheme.inkSecondary)
             }
             Spacer()
             if activity.isAvailable {
                 Button("去签到") { onTap() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(MacPrimaryButtonStyle(compact: true))
             } else {
-                CxBadge("已结束", tone: .neutral)
+                MacTag(text: "已结束")
                 Button("重试") { onTap() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(MacSecondaryButtonStyle(compact: true))
             }
         }
-        .padding(.vertical, 4)
+        .macPanel(padding: 12)
     }
 }
+
+// MARK: - Sign Action & Captcha Sheets
 
 private enum MacPhotoSignMode: String, CaseIterable, Identifiable {
     case fastClick = "无图快签"
@@ -634,25 +827,27 @@ private struct MacStandaloneQRSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("独立扫码签到")
-                    .font(.title3.weight(.semibold))
+                    .font(.headline)
+                    .foregroundStyle(MacTheme.ink)
                 Spacer()
                 Button("关闭") { close() }
+                    .buttonStyle(MacSecondaryButtonStyle(compact: true))
             }
-            Text("粘贴超星签到二维码链接（SIGNIN:... 或 https://...）或选择本地二维码截图，自动解析活动并进入签到工作台。")
+            Text("粘贴超星签到二维码链接（SIGNIN:... 或 https://...）或选择二维码截图。")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MacTheme.inkSecondary)
 
             TextField("粘贴二维码内容或链接", text: $rawInput)
-                .textFieldStyle(.roundedBorder)
+                .macInputField()
                 .onSubmit { resolve() }
 
             HStack(spacing: 10) {
                 Button {
                     pickQRImage()
                 } label: {
-                    Label("从图片/截图识别二维码", systemImage: "photo.on.rectangle")
+                    Label("从图片识别二维码", systemImage: "photo.on.rectangle")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(MacSecondaryButtonStyle(compact: true))
 
                 Spacer()
 
@@ -660,23 +855,24 @@ private struct MacStandaloneQRSheet: View {
                     resolve()
                 } label: {
                     if isResolving {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.mini)
                     } else {
                         Text("解析活动")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(MacPrimaryButtonStyle(compact: true))
                 .disabled(isResolving || rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
             if let errorText {
                 Text(errorText)
                     .font(.caption)
-                    .foregroundStyle(CxPalette.cinnabar)
+                    .foregroundStyle(MacTheme.danger)
             }
         }
         .padding(20)
-        .frame(width: 480)
+        .frame(width: 460)
+        .background(MacTheme.canvas)
         .onChange(of: appState.signSessionID) { close() }
         .onDisappear { resolutionTask?.cancel() }
     }
@@ -780,10 +976,11 @@ struct MacSignActionSheet: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text((isSignOutDrillDown ? "[签退] " : "") + currentActivity.nameOne)
-                            .font(.title3.weight(.semibold))
+                            .font(.headline)
+                            .foregroundStyle(MacTheme.ink)
                         Text("\(currentActivity.courseName.isEmpty ? "活动 #\(currentActivity.id)" : currentActivity.courseName) · \(effectiveSignType.displayName)")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MacTheme.inkSecondary)
                     }
                     Spacer()
                     if isLoadingInfo {
@@ -795,46 +992,47 @@ struct MacSignActionSheet: View {
                             isSignOutDrillDown = false
                             results = []
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(MacSecondaryButtonStyle(compact: true))
                         .disabled(isSubmitting)
                     }
                     Button("关闭") { close() }
+                        .buttonStyle(MacSecondaryButtonStyle(compact: true))
                 }
 
-                // Live status & server requirement badges
+                // Live status & server requirement tags
                 HStack(spacing: 6) {
                     if let status = currentPreparation?.status {
                         switch status {
                         case .readyToSign:
-                            CxBadge("可签到", tone: .sage, showDot: true)
+                            MacTag(text: "可签到", color: MacTheme.sage)
                         case .alreadySigned:
-                            CxBadge("当前号已签", tone: .accent, showDot: true)
+                            MacTag(text: "当前号已签", color: MacTheme.accent)
                         case .expired:
-                            CxBadge("已截止", tone: .cinnabar, showDot: true)
+                            MacTag(text: "已截止", color: MacTheme.danger)
                         }
                     } else if !isLoadingInfo {
-                        Text("未能确认活动状态，请重新打开活动后再试")
+                        Text("未能确认活动状态，请重新打开后再试")
                             .font(.caption)
-                            .foregroundStyle(CxPalette.cinnabar)
+                            .foregroundStyle(MacTheme.danger)
                     }
                     if let detail = detailMeta {
-                        if detail.isPhotoRequired { CxBadge("需拍照", tone: .amber) }
-                        if detail.isPositionRequired { CxBadge("需位置", tone: .amber) }
-                        if detail.isCaptchaRequired { CxBadge("需滑块", tone: .cinnabar) }
-                        if detail.isFaceRequired { CxBadge("自动人脸核验", tone: .accent) }
+                        if detail.isPhotoRequired { MacTag(text: "需拍照", color: MacTheme.amber) }
+                        if detail.isPositionRequired { MacTag(text: "需位置", color: MacTheme.amber) }
+                        if detail.isCaptchaRequired { MacTag(text: "需滑块", color: MacTheme.danger) }
+                        if detail.isFaceRequired { MacTag(text: "自动人脸核验", color: MacTheme.accent) }
                         if let range = detail.targetLocation?.rangeMeters, range > 0 {
-                            CxBadge("围栏 \(range)m", tone: .neutral, monospaced: true)
+                            MacTag(text: "围栏 \(range)m", monospaced: true)
                         }
                     }
                 }
 
-                // Linked sign-out activity drill-down
                 if !isSignOutDrillDown, let signOutId = detailMeta?.signOutInfo.signOutId, signOutId > 0 {
                     HStack {
                         Image(systemName: "arrow.uturn.right.circle.fill")
-                            .foregroundStyle(CxPalette.accent)
+                            .foregroundStyle(MacTheme.accent)
                         Text("检测到关联签退活动 (#\(signOutId))")
                             .font(.caption.weight(.medium))
+                            .foregroundStyle(MacTheme.ink)
                         Spacer()
                         Button {
                             openLinkedSignOut(signOutId: signOutId)
@@ -845,77 +1043,83 @@ struct MacSignActionSheet: View {
                                 Text("切换至签退")
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(MacSecondaryButtonStyle(compact: true))
                         .disabled(isOpeningSignOut || isSubmitting)
                     }
                     .padding(10)
-                    .background(CxPalette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .background(MacTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
 
                 if let signOutError {
                     Text(signOutError)
                         .font(.caption)
-                        .foregroundStyle(CxPalette.cinnabar)
+                        .foregroundStyle(MacTheme.danger)
                 }
 
-                Divider()
+                MacDivider()
 
                 signInputSection
 
                 if needsLocationPicker && effectiveSignType != .location {
-                    Divider()
-                    locationPickerBlock(title: "该活动同时要求位置校验：")
+                    MacDivider()
+                    locationPickerBlock(title: "该活动同时要求位置校验")
                 }
 
                 if appState.accounts.count > 1 {
-                    Divider()
-                    Text("选择执行账号（支持多账号错峰代签）：")
-                        .font(.caption.weight(.semibold))
-                    ForEach(appState.accounts) { acc in
-                        Toggle("\(appState.accountDisplayTitle(for: acc)) (\(acc.phoneNumber))", isOn: Binding(
-                            get: { selectedPhones.contains(acc.phoneNumber) },
-                            set: { checked in
-                                if checked { selectedPhones.insert(acc.phoneNumber) }
-                                else { selectedPhones.remove(acc.phoneNumber) }
-                            }
-                        ))
-                        .controlSize(.small)
-                        .disabled(isSubmitting)
+                    MacDivider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("执行账号")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(MacTheme.inkSecondary)
+                        ForEach(appState.accounts) { acc in
+                            Toggle("\(appState.accountDisplayTitle(for: acc)) (\(acc.phoneNumber))", isOn: Binding(
+                                get: { selectedPhones.contains(acc.phoneNumber) },
+                                set: { checked in
+                                    if checked { selectedPhones.insert(acc.phoneNumber) }
+                                    else { selectedPhones.remove(acc.phoneNumber) }
+                                }
+                            ))
+                            .toggleStyle(.checkbox)
+                            .font(.subheadline)
+                            .disabled(isSubmitting)
+                        }
                     }
                 }
 
                 if !results.isEmpty {
-                    Divider()
-                    VStack(alignment: .leading, spacing: 4) {
+                    MacDivider()
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(ChaoxingSignCounts(dispositions: results.map(\.disposition)).summary)
                             .font(.caption.weight(.semibold))
+                            .foregroundStyle(MacTheme.ink)
                         ForEach(results) { res in
                             HStack {
                                 Text(res.accountName)
+                                    .foregroundStyle(MacTheme.ink)
                                 Spacer()
                                 switch res.disposition {
                                 case .accepted:
                                     Label("本次请求获接受", systemImage: "checkmark.circle.fill")
-                                        .foregroundStyle(CxPalette.sage)
+                                        .foregroundStyle(MacTheme.sage)
                                 case .alreadySigned:
                                     Label("此前已签", systemImage: "clock")
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(MacTheme.inkSecondary)
                                 case .failed:
                                     Label("失败或未确认 · \(res.message)", systemImage: "xmark.circle.fill")
-                                        .foregroundStyle(CxPalette.cinnabar)
+                                        .foregroundStyle(MacTheme.danger)
                                 }
                             }
                             .font(.caption)
                         }
                     }
+                    .macPanel(padding: 10)
                 }
 
                 HStack {
                     if detailMeta?.isFaceRequired == true {
-                        Text("提交时将自动附带各账号人脸底库核验凭证")
+                        Text("提交时将自动附带各账号人脸底库凭证")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MacTheme.inkSecondary)
                     }
                     Spacer()
                     Button {
@@ -925,18 +1129,20 @@ struct MacSignActionSheet: View {
                             ProgressView().controlSize(.small)
                         } else {
                             Text(isSignOutDrillDown ? "立即签退" : "立即签到")
+                                .frame(minWidth: 72)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(MacPrimaryButtonStyle())
                     .disabled(isLoadingInfo || isOpeningSignOut || !appState.canExecuteSign(
                         activity: currentActivity, prepared: currentPreparation, targetPhones: selectedPhones
                     ))
                 }
-                .padding(.top, 6)
+                .padding(.top, 4)
             }
             .padding(20)
         }
-        .frame(width: 540, height: 480)
+        .macCanvas()
+        .frame(width: 520, height: 470)
         .onAppear {
             if let bound = appState.boundLocation(for: currentActivity.courseId),
                let matching = appState.locationPresets.first(where: { $0.id == bound.id || $0.name == bound.name }) {
@@ -972,62 +1178,74 @@ struct MacSignActionSheet: View {
     private var signInputSection: some View {
         switch effectiveSignType {
         case .location:
-            locationPickerBlock(title: "选择签到位置：")
+            locationPickerBlock(title: "签到位置")
         case .password, .gesture:
             TextField(effectiveSignType == .gesture ? "输入手势数字（如 1235789）" : "输入签到码", text: $codeInput)
-                .textFieldStyle(.roundedBorder)
+                .macInputField()
         case .qrCode:
             VStack(alignment: .leading, spacing: 8) {
                 TextField("粘贴二维码链接或 enc 值", text: $qrInput)
-                    .textFieldStyle(.roundedBorder)
-                Button("从本地二维码图片/截图识别") {
+                    .macInputField()
+                Button("从本地二维码图片识别") {
                     pickQRImage()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(MacSecondaryButtonStyle(compact: true))
             }
         case .unknown:
             Text("未能识别此活动类型")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MacTheme.inkSecondary)
         case .photoOrClick:
             VStack(alignment: .leading, spacing: 10) {
-                Picker("提交方式", selection: $photoMode) {
+                HStack(spacing: 6) {
                     ForEach(MacPhotoSignMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                        let selected = photoMode == mode
+                        Button(mode.rawValue) {
+                            photoMode = mode
+                        }
+                        .font(.caption.weight(selected ? .semibold : .regular))
+                        .foregroundStyle(selected ? MacTheme.accent : MacTheme.inkSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(selected ? MacTheme.accent.opacity(0.12) : MacTheme.sidebar)
+                        )
+                        .buttonStyle(.plain)
                     }
                 }
-                .pickerStyle(.segmented)
 
                 switch photoMode {
                 case .fastClick:
                     Text("不上传照片直接提交，适用于普通点击签到。")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MacTheme.inkSecondary)
                 case .profileFace:
                     Text("自动拉取各账号超星人脸底库照片作为签到图片提交。")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MacTheme.inkSecondary)
                 case .localImage:
                     HStack(spacing: 8) {
-                        Button("选择本地签到图片") {
+                        Button("选择本地图片") {
                             pickSignPhoto()
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(MacSecondaryButtonStyle(compact: true))
                         if let photoURL = selectedPhotoURL {
                             Text(photoURL.lastPathComponent)
                                 .font(.caption)
-                                .foregroundStyle(CxPalette.sage)
+                                .foregroundStyle(MacTheme.sage)
                                 .lineLimit(1)
                             Button("清除") {
                                 selectedPhotoURL = nil
                                 selectedPhotoData = nil
                             }
-                            .buttonStyle(.borderless)
                             .font(.caption)
+                            .foregroundStyle(MacTheme.inkSecondary)
+                            .buttonStyle(.plain)
                         } else {
                             Text("未选择图片")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(MacTheme.inkTertiary)
                         }
                     }
                 }
@@ -1038,9 +1256,9 @@ struct MacSignActionSheet: View {
     @ViewBuilder
     private func locationPickerBlock(title: String) -> some View {
         if appState.locationPresets.isEmpty {
-            Text("尚未配置位置预设，请先到「账号与设置」中添加经纬度预设。")
+            Text("尚未配置位置预设，请先到「设置」中添加经纬度预设。")
                 .font(.caption)
-                .foregroundStyle(CxPalette.cinnabar)
+                .foregroundStyle(MacTheme.danger)
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 Picker(title, selection: $selectedLocationId) {
@@ -1049,7 +1267,9 @@ struct MacSignActionSheet: View {
                     }
                 }
                 Toggle("记住为本课默认签到位置", isOn: $rememberLocationForCourse)
-                    .controlSize(.small)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+                    .foregroundStyle(MacTheme.inkSecondary)
             }
         }
     }
@@ -1141,12 +1361,14 @@ private struct MacCaptchaSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("手动完成滑块验证 · \(challenge.accountName)")
+                Text("滑块验证 · \(challenge.accountName)")
                     .font(.headline)
+                    .foregroundStyle(MacTheme.ink)
                 Spacer()
                 Button("取消") {
                     appState.cancelCaptchaChallenge(id: challenge.id)
                 }
+                .buttonStyle(MacSecondaryButtonStyle(compact: true))
             }
 
             if let bg = shadeImage {
@@ -1161,8 +1383,8 @@ private struct MacCaptchaSheet: View {
                             .offset(x: sliderX)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(CxPalette.border, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(MacTheme.border, lineWidth: 1))
             }
 
             Slider(value: $sliderX, in: 0...maxOffset)
@@ -1170,29 +1392,30 @@ private struct MacCaptchaSheet: View {
             if let feedback {
                 Text(feedback)
                     .font(.caption)
-                    .foregroundStyle(CxPalette.cinnabar)
+                    .foregroundStyle(MacTheme.danger)
             }
 
             HStack {
-                Text("滑块位置: \(Int(round(sliderX))) px")
-                    .font(CxTypography.mono(11))
-                    .foregroundStyle(.secondary)
+                Text("位置 \(Int(round(sliderX))) px")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(MacTheme.inkSecondary)
                 Spacer()
                 Button {
                     verify()
                 } label: {
                     if isVerifying {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.mini)
                     } else {
                         Text("提交验证")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(MacPrimaryButtonStyle(compact: true))
                 .disabled(isVerifying)
             }
         }
         .padding(20)
         .frame(width: max(380, bgWidth + 40))
+        .background(MacTheme.canvas)
         .onDisappear { verificationTask?.cancel() }
     }
 
@@ -1224,4 +1447,3 @@ private struct MacCaptchaSheet: View {
     }
 }
 #endif
-

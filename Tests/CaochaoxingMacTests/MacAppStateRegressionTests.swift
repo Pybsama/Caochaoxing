@@ -319,5 +319,107 @@ struct MacAppStateRegressionTests {
         #expect(!log.contains("13800000001") && !log.contains("13900000002") && !log.contains("138-0000-0001"))
         #expect(log.contains("139****0002") && log.contains("138****0001"))
     }
+
+    @Test func concurrencyDefaultIsFiveAndPersistsUpToTen() async throws {
+        let key = "caochaoxing.mac.maxConcurrency"
+        let original = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let original {
+                UserDefaults.standard.set(original, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+
+        UserDefaults.standard.removeObject(forKey: key)
+        let fresh = try await MacFixture()
+        #expect(fresh.state.maxConcurrentWatches == 5)
+
+        fresh.state.maxConcurrentWatches = 10
+        let restoredTen = try await MacFixture()
+        #expect(restoredTen.state.maxConcurrentWatches == 10)
+
+        UserDefaults.standard.set(99, forKey: key)
+        let clamped = try await MacFixture()
+        #expect(clamped.state.maxConcurrentWatches == 5)
+    }
+
+    @Test func webViewHelpersBuildChapterURLAndIsolateCookiesAcrossAccountSwitches() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let file = directory.appendingPathComponent("state.json")
+        let store = ChaoxingPersistenceStore(customFileURL: file)
+        let acc1 = ChaoxingAccountSession(
+            phoneNumber: "13800000011",
+            encryptedPassword: "f1",
+            puid: 101,
+            deviceCode: "d1",
+            cookies: [ChaoxingStoredCookie(name: "UID", value: "101", domain: ".chaoxing.com")],
+            isPrimary: true
+        )
+        let acc2 = ChaoxingAccountSession(
+            phoneNumber: "13800000022",
+            encryptedPassword: "f2",
+            puid: 202,
+            deviceCode: "d2",
+            cookies: [ChaoxingStoredCookie(name: "UID", value: "202", domain: ".chaoxing.com")],
+            isPrimary: false
+        )
+        try await store.save(ChaoxingAppStateSnapshot(accounts: [acc1, acc2]))
+
+        OfflineMacTransport.reset { _ in .http(200, #"{"result":1,"channelList":[]}"#) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [OfflineMacTransport.self]
+        let state = MacAppState(store: store, clientConfiguration: config)
+        await state.restore()
+
+        #expect(state.activeCookiesForWebView().first(where: { $0.name == "UID" })?.value == "101")
+
+        let chapter = ChaoxingChapterNode(id: "4455", title: "第一章测验", courseId: 123, classId: 456)
+        state.currentCpi = 9876
+        let urlWithCpi = try #require(state.chapterStudyURL(for: chapter))
+        #expect(urlWithCpi.absoluteString.contains("chapterId=4455"))
+        #expect(urlWithCpi.absoluteString.contains("courseId=123"))
+        #expect(urlWithCpi.absoluteString.contains("clazzid=456"))
+        #expect(urlWithCpi.absoluteString.contains("cpi=9876"))
+        #expect(urlWithCpi.absoluteString.contains("mooc2=1"))
+
+        await state.switchAccount(acc2)
+        #expect(state.activeCookiesForWebView().first(where: { $0.name == "UID" })?.value == "202")
+    }
+
+    @Test func autoWatchWaitsUntilBufferingFinishesBeforeStartingAndHonorsCancel() async throws {
+        let f = try await MacFixture()
+        var ready = false
+        var waitingCallbacks = 0
+
+        let gateTask = Task { @MainActor in
+            await f.state.waitUntilPlaybackReady(
+                title: "演示视频",
+                isReady: { ready },
+                onWaiting: { _ in waitingCallbacks += 1 }
+            )
+        }
+
+        try #require(await eventually { waitingCallbacks >= 1 })
+        #expect(f.state.logs.contains(where: { $0.message.contains("加载与缓冲完成") }) == false)
+
+        ready = true
+        let passedGate = await gateTask.value
+        #expect(passedGate == true)
+        #expect(f.state.logs.contains(where: { $0.message.contains("加载与缓冲完成") }))
+
+        let cancelledTask = Task { @MainActor in
+            await f.state.waitUntilPlaybackReady(
+                title: "取消测试",
+                isReady: { false },
+                onWaiting: { _ in }
+            )
+        }
+        cancelledTask.cancel()
+        #expect(await cancelledTask.value == false)
+    }
 }
 #endif

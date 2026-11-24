@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Pybsama.
+
+name: Windows CI
+
+on:
+  push:
+    paths:
+      - 'windows/**'
+      - 'android/core/**'
+      - '.github/workflows/windows-ci.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'android/core/**'
+      - '.github/workflows/windows-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-package:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Run core and Windows desktop unit tests
+        run: gradle :core:test :app:test
+
+      - name: Build portable Windows distributable
+        run: gradle :app:createDistributable
+
+      - name: Zip portable Windows app
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "app/build/compose/binaries/main/app/Caochaoxing/*" -DestinationPath "app/build/Caochaoxing-windows-portable.zip" -Force
+
+      - name: Ensure WiX Toolset v3 is available for jpackage MSI
+        shell: pwsh
+        run: |
+          $wixBin = $null
+          if ($env:WIX -and (Test-Path (Join-Path $env:WIX "bin\candle.exe"))) {
+            $wixBin = Join-Path $env:WIX "bin"
+          } else {
+            $found = Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3*\bin\candle.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $wixBin = $found.Directory.FullName }
+          }
+          if (-not $wixBin) {
+            choco install wixtoolset --no-progress -y
+            $found = Get-ChildItem "C:\Program Files (x86)\WiX Toolset v3*\bin\candle.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $wixBin = $found.Directory.FullName }
+          }
+          if ($wixBin) {
+            echo $wixBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            Write-Host "Using WiX Toolset at $wixBin"
+          } else {
+            throw "WiX Toolset v3 (candle.exe / light.exe) not found"
+          }
+
+      - name: Build Windows MSI installer
+        run: gradle :app:packageMsi
+
+      - name: Upload Windows portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Caochaoxing-windows-portable
+          path: windows/app/build/Caochaoxing-windows-portable.zip
+
+      - name: Upload Windows MSI installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Caochaoxing-windows-msi
+          path: windows/app/build/compose/binaries/main/msi/*.msi

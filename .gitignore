@@ -29,6 +29,8 @@ state.recovery-*.json
 state.enc
 caochaoxing_state.enc
 state.recovery-*.enc
+state.dpapi
+state.recovery-*.dpapi
 caochaoxing_full_backup.json
 caochaoxing_presets_backup.json
 Caochaoxing-backup-*.json
@@ -49,6 +51,16 @@ android/captures/
 *.dex
 *.jks
 *.keystore
+
+# Windows Gradle / IDE / build outputs & installers
+windows/.gradle/
+windows/.kotlin/
+windows/build/
+windows/*/build/
+windows/.idea/
+windows/*.iml
+*.msi
+*.exe
 
 # Local workspace metadata
 .superpowers/

@@ -11,9 +11,10 @@ body:
     attributes:
       label: 目标平台
       options:
-        - 全平台（macOS / iOS / iPadOS / Android）
+        - 全平台（macOS / Windows / iOS / iPadOS / Android）
         - Android
         - macOS
+        - Windows
         - iOS / iPadOS
     validations:
       required: true

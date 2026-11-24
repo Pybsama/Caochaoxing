@@ -303,6 +303,48 @@ struct ChaoxingCourseStudyServiceTests {
         #expect(content.otherAttachments[2].kind == .live)
         #expect(content.otherAttachments[3].kind == .quiz)
         #expect(content.otherAttachments[3].name == "章节测验")
+        #expect(content.otherAttachments[3].chapterStudyURL?.absoluteString.contains("chapterId=10") == true)
+    }
+
+    @Test("parseChapterCardsContent builds directQuizURL and chapterStudyURL for quiz attachments")
+    func testParseQuizDirectURL() throws {
+        let html = """
+        <script>
+        mArg = {"defaults":{"userid":"42","cpi":8888,"ktoken":"ktok_demo","reportTimeInterval":60},"attachments":[
+            {"job":true,"jobid":"work-777","type":"workid","enc":"enc_demo_123","property":{"module":"work","title":"第一章测验","workid":777}},
+            {"job":true,"jobid":"work-888","type":"workid","property":{"module":"work","title":"无workId测验"}},
+            {"job":false,"jobid":"ext-1","type":"other","property":{"module":"insertlink","name":"危险外链","url":"javascript:alert(1)"}}
+        ]};
+        </script>
+        """
+        let content = try ChaoxingCourseStudyService.parseChapterCardsContent(html, courseId: 100, classId: 200, chapterId: "300")
+        #expect(content.otherAttachments.count == 3)
+
+        let quiz = content.otherAttachments[0]
+        #expect(quiz.kind == .quiz)
+        #expect(quiz.workId == "777")
+        #expect(quiz.workEnc == "enc_demo_123")
+        #expect(quiz.ktoken == "ktok_demo")
+        #expect(quiz.directQuizURL?.absoluteString.contains("https://mooc1.chaoxing.com/mooc-ans/api/work") == true)
+        #expect(quiz.directQuizURL?.absoluteString.contains("workId=777") == true)
+        #expect(quiz.directQuizURL?.absoluteString.contains("enc=enc_demo_123") == true)
+        #expect(quiz.directQuizURL?.absoluteString.contains("cpi=8888") == true)
+        #expect(quiz.preferredInAppURL == quiz.directQuizURL)
+        #expect(quiz.chapterStudyURL?.absoluteString.contains("https://mooc1.chaoxing.com/mycourse/studentstudy") == true)
+
+        let updatedQuiz = quiz.updating(isPassed: true)
+        #expect(updatedQuiz.isPassed == true)
+        #expect(updatedQuiz.workId == "777")
+        #expect(updatedQuiz.workEnc == "enc_demo_123")
+        #expect(updatedQuiz.ktoken == "ktok_demo")
+        #expect(updatedQuiz.cpi == 8888)
+
+        let fallbackQuiz = content.otherAttachments[1]
+        #expect(fallbackQuiz.directQuizURL == nil)
+        #expect(fallbackQuiz.preferredInAppURL == fallbackQuiz.chapterStudyURL)
+
+        let unsafeExt = content.otherAttachments[2]
+        #expect(unsafeExt.preferredInAppURL == unsafeExt.chapterStudyURL)
     }
 
     @Test("parseChapterCardsContent extracts insertlive tasks and audio dtype")

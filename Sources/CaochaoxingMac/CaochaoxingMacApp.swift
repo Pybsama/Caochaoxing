@@ -23,10 +23,14 @@ struct CaochaoxingMacApp: App {
     }
 
     var body: some Scene {
-        Window("草超星 · macOS", id: "main") {
+        Window("草超星", id: "main") {
             MacCourseStudyView()
                 .environment(appState)
-                .frame(minWidth: 1060, minHeight: 680)
+                .frame(minWidth: 1020, minHeight: 660)
+                .tint(MacTheme.accent)
+                .background(MacTheme.canvas)
+                .toolbarBackground(MacTheme.canvas, for: .windowToolbar)
+                .background { MacWindowChromeStyler().frame(width: 0, height: 0) }
                 .task {
                     await appState.restore()
                 }
