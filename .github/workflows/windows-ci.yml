@@ -48,6 +48,12 @@ jobs:
         run: |
           Compress-Archive -Path "app/build/compose/binaries/main/app/Caochaoxing/*" -DestinationPath "app/build/Caochaoxing-windows-portable.zip" -Force
 
+      - name: Upload Windows portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Caochaoxing-windows-portable
+          path: windows/app/build/Caochaoxing-windows-portable.zip
+
       - name: Ensure WiX Toolset v3 is available for jpackage MSI
         shell: pwsh
         run: |
@@ -71,13 +77,16 @@ jobs:
           }
 
       - name: Build Windows MSI installer
-        run: gradle :app:packageMsi
-
-      - name: Upload Windows portable ZIP artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Caochaoxing-windows-portable
-          path: windows/app/build/Caochaoxing-windows-portable.zip
+        shell: pwsh
+        run: |
+          gradle :app:packageMsi
+          if ($LASTEXITCODE -ne 0) {
+            Get-ChildItem "app/build/compose/logs/packageMsi" -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "=== $($_.Name) ==="
+              Get-Content $_.FullName
+            }
+            exit $LASTEXITCODE
+          }
 
       - name: Upload Windows MSI installer artifact
         uses: actions/upload-artifact@v4
