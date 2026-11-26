@@ -15,6 +15,7 @@ import com.caochaoxing.core.model.ChaoxingSignDetailMetadata
 import com.caochaoxing.core.model.ChaoxingSignOutInfo
 import com.caochaoxing.core.model.ChaoxingSignType
 import com.caochaoxing.core.network.ChaoxingHttpClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -136,12 +137,29 @@ object ChaoxingActivityService {
             endpoints.signInfoBase,
             listOf("activeId" to activeId.toString()),
         )
-        val response = client.get(url)
+        var response = client.get(url)
+        var root = if (response.isSuccessful) parseJsonObjectOrNull(response.body) else null
+        var info = root?.takeIf { it.strictBooleanOrNull("result") != false }?.objectOrNull("data")
+        val needsReLogin = response.statusCode in setOf(401, 403, 302) ||
+            (response.isSuccessful && (root == null || root.strictBooleanOrNull("result") == false || info == null))
+        if (needsReLogin) {
+            val reLoggedIn = try {
+                ChaoxingAuthService.reLogin(endpoints, client)
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                false
+            }
+            if (reLoggedIn) {
+                response = client.get(url)
+                root = if (response.isSuccessful) parseJsonObjectOrNull(response.body) else null
+                info = root?.takeIf { it.strictBooleanOrNull("result") != false }?.objectOrNull("data")
+            }
+        }
         if (!response.isSuccessful) {
             throw ChaoxingError.NetworkError(statusCode = response.statusCode, message = "获取签到详情失败")
         }
-        val root = parseJsonObjectOrNull(response.body)
-        val info = root?.takeIf { it.strictBooleanOrNull("result") != false }?.objectOrNull("data")
         val rawOtherId = info?.stringOrNumberString("otherId")
             ?: throw ChaoxingError.ParseFailed("获取签到活动信息失败")
 
@@ -153,8 +171,12 @@ object ChaoxingActivityService {
         val title = info.stringOnlyOrNull("name")
             ?: info.stringOnlyOrNull("title")
             ?: signType.displayName
-        val classId = info.numberIntOrNull("clazzid") ?: fallbackClassId
-        var courseId = info.numberLongOrNull("courseId") ?: fallbackCourseId
+        val classId = info.intOrStringIntOrNull("clazzid")
+            ?: info.intOrStringIntOrNull("clazzId")
+            ?: fallbackClassId
+        var courseId = info.longOrStringLongOrNull("courseId")
+            ?: info.longOrStringLongOrNull("courseid")
+            ?: fallbackCourseId
         if (courseId == 0L && classId != 0) {
             courseId = ChaoxingCourseService.getCourseIdFromClassId(endpoints, client, classId) ?: 0L
         }
@@ -164,11 +186,11 @@ object ChaoxingActivityService {
         val isPosition = parseBoolFlag(info["ifopenAddress"])
         val isPhoto = parseBoolFlag(info["ifphoto"])
         val isRefreshQRCode = parseBoolFlag(info["ifrefreshewm"])
-        val numberCount = info.numberIntOrNull("numberCount")
+        val numberCount = info.intOrStringIntOrNull("numberCount")
 
-        val targetLat = info.numberDoubleOrNull("locationLatitude")
-        val targetLon = info.numberDoubleOrNull("locationLongitude")
-        val rangeMeters = info.numberIntOrNull("locationRange")
+        val targetLat = info.doubleOrStringDoubleOrNull("locationLatitude")
+        val targetLon = info.doubleOrStringDoubleOrNull("locationLongitude")
+        val rangeMeters = info.intOrStringIntOrNull("locationRange")
         val targetLocation = if (targetLat != null || targetLon != null || rangeMeters != null) {
             ChaoxingLocationTarget(
                 latitude = targetLat,
@@ -179,9 +201,9 @@ object ChaoxingActivityService {
             null
         }
 
-        val signInId = info.numberLongOrNull("signInId")
-        val signOutId = info.numberLongOrNull("signOutId")
-        val rawSignOutTs = info.numberLongOrNull("signOutPublishTimeStamp")
+        val signInId = info.longOrStringLongOrNull("signInId")
+        val signOutId = info.longOrStringLongOrNull("signOutId")
+        val rawSignOutTs = info.longOrStringLongOrNull("signOutPublishTimeStamp")
         val signOutPublishTimeMs = if (rawSignOutTs == null || rawSignOutTs == -1L || rawSignOutTs == NO_SIGN_OFF_EVENT) {
             null
         } else {
@@ -217,15 +239,28 @@ object ChaoxingActivityService {
     ): ChaoxingSignActivity =
         buildActivityFromQrCode(ChaoxingEndpoints.PRODUCTION, client, qrResult)
 
+    suspend fun buildActivityAndDetailFromQrCode(
+        client: ChaoxingHttpClient,
+        qrResult: ChaoxingQrCodeParseResult,
+    ): Pair<ChaoxingSignActivity, ChaoxingSignDetailMetadata> =
+        buildActivityAndDetailFromQrCode(ChaoxingEndpoints.PRODUCTION, client, qrResult)
+
     internal suspend fun buildActivityFromQrCode(
         endpoints: ChaoxingEndpoints,
         client: ChaoxingHttpClient,
         qrResult: ChaoxingQrCodeParseResult,
-    ): ChaoxingSignActivity {
+    ): ChaoxingSignActivity =
+        buildActivityAndDetailFromQrCode(endpoints, client, qrResult).first
+
+    internal suspend fun buildActivityAndDetailFromQrCode(
+        endpoints: ChaoxingEndpoints,
+        client: ChaoxingHttpClient,
+        qrResult: ChaoxingQrCodeParseResult,
+    ): Pair<ChaoxingSignActivity, ChaoxingSignDetailMetadata> {
         val aid = qrResult.aid
             ?: throw ChaoxingError.QrCodeParseFailed("二维码中未包含签到活动 ID")
         val detail = fetchSignDetail(endpoints, client, activeId = aid)
-        return ChaoxingSignActivity(
+        val activity = ChaoxingSignActivity(
             id = aid,
             startTimeMs = null,
             endTimeMs = null,
@@ -242,6 +277,7 @@ object ChaoxingActivityService {
             courseName = "二维码扫码活动",
             extContent = "{}",
         )
+        return activity to detail
     }
 
     internal fun parseBoolFlag(raw: JsonElement?): Boolean {

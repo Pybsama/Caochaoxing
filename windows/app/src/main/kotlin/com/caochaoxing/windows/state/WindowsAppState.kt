@@ -928,6 +928,7 @@ class WindowsAppState(
         activity: ChaoxingSignActivity,
         selectedPhones: Set<String>,
         onProgress: (List<BatchSignResult>) -> Unit = {},
+        ignoreBatchDelay: Boolean = false,
         operation: suspend (
             client: ChaoxingHttpClient,
             account: ChaoxingAccountSession,
@@ -942,7 +943,7 @@ class WindowsAppState(
             throw ChaoxingError.InvalidInput("请至少选择一个签到账号")
         }
         val pairs = targets.map { account -> account to clientFor(account) }
-        val delayMs = _uiState.value.batchSignDelayMs.coerceIn(0, MAX_BATCH_DELAY_MS)
+        val delayMs = if (ignoreBatchDelay) 0 else _uiState.value.batchSignDelayMs.coerceIn(0, MAX_BATCH_DELAY_MS)
         val collected = mutableListOf<BatchSignResult>()
         val challenges = mutableListOf<Triple<ChaoxingAccountSession, ChaoxingHttpClient, String?>>()
 

@@ -48,6 +48,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -133,6 +135,7 @@ data class StandaloneQrUiState(
     val selectionInitialized: Boolean = false,
     val includeLocation: Boolean = false,
     val selectedPresetId: String? = null,
+    val autoSubmitOnScan: Boolean = false,
     val isWorking: Boolean = false,
     val results: List<BatchSignResult> = emptyList(),
 )
@@ -197,6 +200,10 @@ class StandaloneQrViewModel(
         _state.update { it.copy(selectedPresetId = presetId) }
     }
 
+    fun onAutoSubmitOnScanChange(enabled: Boolean) {
+        _state.update { it.copy(autoSubmitOnScan = enabled) }
+    }
+
     fun onSessionChanged(token: SessionToken) {
         if (lastSessionToken == token) return
         val isInitial = lastSessionToken == null
@@ -237,14 +244,8 @@ class StandaloneQrViewModel(
         _state.update { it.copy(isResolving = true) }
         resolveJob = viewModelScope.launch {
             try {
-                val activity = ChaoxingActivityService.buildActivityFromQrCode(client, payload)
+                val (activity, detail) = ChaoxingActivityService.buildActivityAndDetailFromQrCode(client, payload)
                 ensureActive()
-                val detail = ChaoxingActivityService.fetchSignDetail(
-                    client = client,
-                    activeId = activity.id,
-                    fallbackClassId = activity.classId,
-                    fallbackCourseId = activity.courseId,
-                )
                 appState.checkSession(token)
                 if (resolveRequestId != requestId || _state.value.rawQrText != raw) {
                     return@launch
@@ -265,6 +266,20 @@ class StandaloneQrViewModel(
                         retainedPositionRequired = detail.isPositionRequired,
                         includeLocation = if (detail.isPositionRequired) true else current.includeLocation,
                     )
+                }
+                val latest = _state.value
+                if (latest.autoSubmitOnScan && !latest.isWorking && latest.selectedPhones.isNotEmpty()) {
+                    val appUi = appState.uiState.value
+                    val needsPreset = latest.includeLocation || detail.isPositionRequired
+                    val presetReady = !needsPreset || resolveLocationPreset(
+                        appUi = appUi,
+                        courseId = activity.courseId,
+                        includeLocation = true,
+                        selectedPresetId = latest.selectedPresetId,
+                    ) != null
+                    if (presetReady) {
+                        submitBatch()
+                    }
                 }
                 if (!payload.code.isNullOrEmpty()) {
                     val expired = try {
@@ -348,6 +363,7 @@ class StandaloneQrViewModel(
                 val collected = appState.executeSignBatch(
                     activity = activity,
                     selectedPhones = phones,
+                    ignoreBatchDelay = detail.isRefreshQRCode,
                     onProgress = { progress ->
                         _state.update { it.copy(results = progress) }
                     },
@@ -706,6 +722,13 @@ fun StandaloneQrSignScreen(
                                                 icon = Icons.Rounded.LocationOn,
                                             )
                                         }
+                                        if (resolvedDetail?.isRefreshQRCode == true) {
+                                            CxBadge(
+                                                text = "动态码 · 自动免错峰",
+                                                tone = CxTone.AMBER,
+                                                showDot = true,
+                                            )
+                                        }
                                         qrState.expiredHint?.let { expired ->
                                             CxBadge(
                                                 text = if (expired) "警告：动态二维码可能已过期" else "动态二维码校验正常",
@@ -810,6 +833,39 @@ fun StandaloneQrSignScreen(
                                     }
                                 }
                             }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = "扫到即签（动态码推荐）",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontWeight = FontWeight.Medium,
+                                    ),
+                                    color = CxPalette.ink,
+                                )
+                                Text(
+                                    text = "扫码识别后立即提交，减少 5–10 秒动态码过期概率",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = CxPalette.inkSecondary,
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Switch(
+                                checked = qrState.autoSubmitOnScan,
+                                onCheckedChange = viewModel::onAutoSubmitOnScanChange,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = CxPalette.onAccent,
+                                    checkedTrackColor = CxPalette.accent,
+                                ),
+                            )
                         }
 
                         val canSubmit = !qrState.isWorking &&
@@ -1008,7 +1064,7 @@ private fun QrScannerFullScreenDialog(
                     color = Color.Black.copy(alpha = 0.6f),
                 ) {
                     Text(
-                        text = "将签到二维码放入框内自动识别",
+                        text = "双指捏合或拖动滑块缩放 · 轻点对焦",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),

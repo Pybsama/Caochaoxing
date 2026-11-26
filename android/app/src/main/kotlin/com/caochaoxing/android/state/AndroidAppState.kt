@@ -1371,6 +1371,7 @@ class AndroidAppState(
         activity: ChaoxingSignActivity,
         selectedPhones: Set<String>,
         onProgress: (List<BatchSignResult>) -> Unit = {},
+        ignoreBatchDelay: Boolean = false,
         operation: suspend (
             client: ChaoxingHttpClient,
             account: ChaoxingAccountSession,
@@ -1385,7 +1386,7 @@ class AndroidAppState(
             throw ChaoxingError.InvalidInput("请至少选择一个签到账号")
         }
         val pairs = targets.map { account -> account to clientFor(account) }
-        val delayMs = _uiState.value.batchSignDelayMs.coerceIn(0, MAX_BATCH_DELAY_MS)
+        val delayMs = if (ignoreBatchDelay) 0 else _uiState.value.batchSignDelayMs.coerceIn(0, MAX_BATCH_DELAY_MS)
         val collected = arrayOfNulls<BatchSignResult>(pairs.size)
         val resultMutex = Mutex()
 
@@ -1433,7 +1434,11 @@ class AndroidAppState(
                     val referer = ChaoxingSignExecutor.preSignUrl(client, activity)
                     val validate = requestCaptchaValidation(client, referer)
                     checkSession(token)
-                    Result.success(operation(client, account, validate, challenge.enc2))
+                    Result.success(
+                        executeWithDeviceRetry(account, client, token) { refreshedAccount ->
+                            operation(client, refreshedAccount, validate, challenge.enc2)
+                        },
+                    )
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -1555,7 +1560,9 @@ class AndroidAppState(
             ChaoxingSignActivityStatus.EXPIRED ->
                 throw ChaoxingError.SignExpired("签到已截止")
             ChaoxingSignActivityStatus.READY_TO_SIGN -> {
-                val outcome = operation(client, account, null, null)
+                val outcome = executeWithDeviceRetry(account, client, token) { refreshedAccount ->
+                    operation(client, refreshedAccount, null, null)
+                }
                 checkSession(token)
                 Result.success(outcome)
             }
@@ -1564,6 +1571,48 @@ class AndroidAppState(
         throw e
     } catch (e: Exception) {
         Result.failure(e)
+    }
+
+    private suspend fun executeWithDeviceRetry(
+        account: ChaoxingAccountSession,
+        client: ChaoxingHttpClient,
+        token: SessionToken,
+        submit: suspend (ChaoxingAccountSession) -> ChaoxingSignOutcome,
+    ): ChaoxingSignOutcome {
+        return try {
+            submit(account)
+        } catch (e: ChaoxingError.DeviceDuplicated) {
+            checkSession(token)
+            val rotated = rotateDeviceCodeInPlace(account.phoneNumber, client) ?: throw e
+            checkSession(token)
+            submit(rotated)
+        }
+    }
+
+    private suspend fun rotateDeviceCodeInPlace(
+        phoneNumber: String,
+        client: ChaoxingHttpClient,
+    ): ChaoxingAccountSession? {
+        val normalizedPhone = phoneNumber.trim()
+        val updated: ChaoxingAccountSession = synchronized(stateLock) {
+            val current = _uiState.value
+            val index = current.accounts.indexOfFirst { it.phoneNumber.trim() == normalizedPhone }
+            if (index < 0) return null
+            val target = current.accounts[index]
+            val base = client.session
+            val next = base.copy(
+                isPrimary = target.isPrimary,
+                tags = normalizeAccountTags(target.tags),
+                deviceCode = ChaoxingCrypto.randomizedDeviceCode(),
+            )
+            client.updateSession(next)
+            val nextAccounts = current.accounts.toMutableList()
+            nextAccounts[index] = next
+            _uiState.value = current.copy(accounts = nextAccounts)
+            next
+        }
+        saveToDisk()
+        return updated
     }
 
     private suspend fun <T> runCancellableSessionWork(

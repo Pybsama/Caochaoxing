@@ -540,8 +540,9 @@ struct IOSSignWorkspaceView: View {
         isSigning = true
         batchResults = []
         defer { isSigning = false; batchTask = nil }
+        let ignoreDelay = detailMetadata?.isRefreshQRCode == true
         let task = Task {
-            try await appState.executeSignBatch(activity: activity, selectedPhones: phones, onProgress: { batchResults = $0 }, operation: operation)
+            try await appState.executeSignBatch(activity: activity, selectedPhones: phones, ignoreBatchDelay: ignoreDelay, onProgress: { batchResults = $0 }, operation: operation)
         }
         batchTask = task
         var didFinishBatch = false

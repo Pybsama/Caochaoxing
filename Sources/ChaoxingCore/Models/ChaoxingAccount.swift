@@ -184,6 +184,7 @@ public struct ChaoxingCustomClientProfile: Codable, Sendable, Hashable, Identifi
 
 public enum ChaoxingClientPreset: String, CaseIterable, Codable, Sendable, Identifiable {
     case `default` = "@@default"
+    case officialWebView = "@@official_webview"
     case xueZaiXiDian = "@@xuezaixidian"
 
     public var id: String { rawValue }
@@ -191,6 +192,7 @@ public enum ChaoxingClientPreset: String, CaseIterable, Codable, Sendable, Ident
     public var displayName: String {
         switch self {
         case .default: return "官方通用版"
+        case .officialWebView: return "官方 WebView 版"
         case .xueZaiXiDian: return "学在西电定制版"
         }
     }
@@ -199,6 +201,8 @@ public enum ChaoxingClientPreset: String, CaseIterable, Codable, Sendable, Ident
         switch self {
         case .default:
             return "Dalvik/2.1.0 (Linux; U; Android 12; SM-N9006 Build/8aba9e4.0) (schild:2d97f7b9439f21333c946878fc4d6ccb) (device:SM-N9006) Language/zh_CN com.chaoxing.mobile/ChaoXingStudy_3_6.7.5_android_phone_10941_314 (@Kalimdor)_68f184fd763546c1a04ab3a09b3deebb"
+        case .officialWebView:
+            return "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP2A.240805.005; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/128.0.6613.127 Mobile Safari/537.36 (schild:2d97f7b9439f21333c946878fc4d6ccb) (device:Pixel 8) Language/zh_CN com.chaoxing.mobile/ChaoXingStudy_3_6.7.5_android_phone_10941_314 (@Kalimdor)_68f184fd763546c1a04ab3a09b3deebb"
         case .xueZaiXiDian:
             return "Mozilla/5.0 (Linux; Android 16; 23113RKC6C Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/147.0.7727.137 Mobile Safari/537.36 (schild:be536573b69ec1ae359e359d11f7f3e3) (device:23113RKC6C) Language/zh_CN com.chaoxing.mobile.xuezaixidian/ChaoXingStudy_1000149_6.3.7_android_phone_6005_249 (@Kalimdor)_f8777230ca1e45b2831ec7e36a9da1ea"
         }

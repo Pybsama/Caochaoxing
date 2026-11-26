@@ -562,7 +562,7 @@ private fun WorkspaceQrCameraDialog(
                     color = Color.Black.copy(alpha = 0.6f),
                 ) {
                     Text(
-                        text = "将签到二维码放入框内自动识别",
+                        text = "双指捏合或拖动滑块缩放 · 轻点对焦",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),

@@ -965,6 +965,7 @@ public final class IOSAppState {
     public func executeSignBatch(
         activity: ChaoxingSignActivity,
         selectedPhones: Set<String>,
+        ignoreBatchDelay: Bool = false,
         onProgress: (@MainActor @Sendable ([IOSBatchSignResult]) -> Void)? = nil,
         operation: @escaping @Sendable (ChaoxingHTTPClient, ChaoxingAccountSession, String?, String?) async throws -> ChaoxingSignOutcome
     ) async throws -> [IOSBatchSignResult] {
@@ -975,7 +976,7 @@ public final class IOSAppState {
         let targets = selectedAccounts(phones: selectedPhones)
         guard !targets.isEmpty else { throw ChaoxingError.invalidInput("请至少选择一个签到账号") }
         let pairs = targets.map { ($0, client(for: $0)) }
-        let delay = min(max(batchSignDelayMs, 0), 60_000)
+        let delay = ignoreBatchDelay ? 0 : min(max(batchSignDelayMs, 0), 60_000)
         var collected: [IOSBatchSignResult] = []
         var challenges: [(ChaoxingAccountSession, ChaoxingHTTPClient, String?)] = []
 
@@ -1019,7 +1020,9 @@ public final class IOSAppState {
                 let referer = ChaoxingSignExecutor.preSignURL(client: client, activity: activity).absoluteString
                 let validate = try await requestCaptchaValidation(client: client, refererURL: referer)
                 try checkSession(token)
-                let outcome = try await operation(client, account, validate, enc2)
+                let outcome = try await executeWithDeviceRetry(account: account, client: client, token: token) { refreshedAccount in
+                    try await operation(client, refreshedAccount, validate, enc2)
+                }
                 try checkSession(token)
                 collected.append(IOSBatchSignResult(accountName: account.name, phoneNumber: account.phoneNumber, disposition: outcome.disposition, message: outcome.message))
             } catch {
@@ -1047,10 +1050,45 @@ public final class IOSAppState {
             case .expired: throw ChaoxingError.signExpired("签到已截止")
             case .readyToSign: break
             }
-            let outcome = try await operation(client, account, nil, nil)
+            let outcome = try await executeWithDeviceRetry(account: account, client: client, token: token) { refreshedAccount in
+                try await operation(client, refreshedAccount, nil, nil)
+            }
             try checkSession(token)
             return .success(outcome)
         } catch { return .failure(error) }
+    }
+
+    private func executeWithDeviceRetry(
+        account: ChaoxingAccountSession,
+        client: ChaoxingHTTPClient,
+        token: IOSSessionToken,
+        submit: @escaping @Sendable (ChaoxingAccountSession) async throws -> ChaoxingSignOutcome
+    ) async throws -> ChaoxingSignOutcome {
+        do {
+            return try await submit(account)
+        } catch ChaoxingError.deviceDuplicated {
+            try checkSession(token)
+            guard let rotated = await rotateDeviceCodeInPlace(for: account.phoneNumber, client: client) else {
+                throw ChaoxingError.deviceDuplicated()
+            }
+            try checkSession(token)
+            return try await submit(rotated)
+        }
+    }
+
+    private func rotateDeviceCodeInPlace(
+        for phoneNumber: String,
+        client: ChaoxingHTTPClient
+    ) async -> ChaoxingAccountSession? {
+        guard let idx = accounts.firstIndex(where: { $0.phoneNumber == phoneNumber }) else { return nil }
+        var updated = client.session
+        updated.isPrimary = accounts[idx].isPrimary
+        updated.tags = accounts[idx].tags
+        updated.deviceCode = ChaoxingCrypto.randomizedDeviceCode()
+        client.updateSession(updated)
+        accounts[idx] = updated
+        await saveToDisk()
+        return updated
     }
 
     /// Only call after explicit user confirmation; the store preserves the old file before reset.

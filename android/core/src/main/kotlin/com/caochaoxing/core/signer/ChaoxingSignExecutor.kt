@@ -297,7 +297,7 @@ object ChaoxingSignExecutor {
         if (enc2 != null) {
             items.add("enc2" to enc2)
         }
-        return submitSign(endpoints, client, items)
+        return submitSign(endpoints, client, activity, items)
     }
 
     suspend fun signLocation(
@@ -351,7 +351,7 @@ object ChaoxingSignExecutor {
         }
         items.add("locationResult" to buildLocationJson(location, includeMockData = true))
         appendFaceParameters(endpoints, items, client, activeId = activity.id, faceImageObjectId = faceImageObjectId)
-        return submitSign(endpoints, client, items)
+        return submitSign(endpoints, client, activity, items)
     }
 
     suspend fun signQrCode(
@@ -388,8 +388,6 @@ object ChaoxingSignExecutor {
             throw ChaoxingError.InvalidInput("二维码不属于当前活动，请重新选择活动或扫描对应二维码")
         }
         val targetActiveId = activity.id
-        val latStr = location?.let { String.format(Locale.US, "%.6f", it.randomizedLatitude) } ?: "-1"
-        val lonStr = location?.let { String.format(Locale.US, "%.6f", it.randomizedLongitude) } ?: "-1"
 
         val items = mutableListOf(
             "enc" to qrResult.enc,
@@ -397,8 +395,8 @@ object ChaoxingSignExecutor {
             "activeId" to targetActiveId.toString(),
             "uid" to client.session.puid.toString(),
             "clientip" to "",
-            "latitude" to latStr,
-            "longitude" to lonStr,
+            "latitude" to "-1",
+            "longitude" to "-1",
             "fid" to client.session.configuredFid.toString(),
             "appType" to "15",
             "deviceCode" to client.session.deviceCode,
@@ -417,7 +415,7 @@ object ChaoxingSignExecutor {
             items.add("validate" to captchaValidate)
         }
         appendFaceParameters(endpoints, items, client, activeId = targetActiveId, faceImageObjectId = faceImageObjectId)
-        return submitSign(endpoints, client, items)
+        return submitSign(endpoints, client, activity, items)
     }
 
     suspend fun signCodeOrGesture(
@@ -473,7 +471,7 @@ object ChaoxingSignExecutor {
         if (captchaValidate != null) {
             items.add("validate" to captchaValidate)
         }
-        return submitSign(endpoints, client, items)
+        return submitSign(endpoints, client, activity, items)
     }
 
     private suspend fun appendFaceParameters(
@@ -517,10 +515,19 @@ object ChaoxingSignExecutor {
     internal suspend fun submitSign(
         endpoints: ChaoxingEndpoints,
         client: ChaoxingHttpClient,
+        activity: ChaoxingSignActivity,
         queryItems: List<Pair<String, String>>,
     ): ChaoxingSignOutcome {
-        val url = ChaoxingHttpClient.encodeChaoxingUrl(endpoints.stuSignBase, queryItems)
-        val response = client.get(url)
+        val referer = preSignUrl(endpoints, client, activity)
+        val response = client.postForm(
+            url = endpoints.stuSignBase,
+            items = queryItems,
+            headers = mapOf(
+                "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
+                "Referer" to referer,
+                "X-Requested-With" to "XMLHttpRequest",
+            ),
+        )
         if (!response.isSuccessful) {
             throw ChaoxingError.NetworkError(statusCode = response.statusCode, message = "签到请求失败")
         }
@@ -535,7 +542,7 @@ object ChaoxingSignExecutor {
         if (result == "您已签到过了") {
             throw ChaoxingError.AlreadySigned()
         }
-        if (result == "签到失败，请重新扫描。") {
+        if (result == "签到失败，请重新扫描。" || result == "fail-need-qrcode") {
             throw ChaoxingError.QrCodeExpired()
         }
         if (result.startsWith("[face]")) {

@@ -196,6 +196,7 @@ struct IOSStandaloneQRCodeSignView: View {
     @State private var selectedPhones: Set<String> = []
     @State private var includeLocation = false
     @State private var selectedPresetId: UUID?
+    @State private var autoSubmitOnScan = false
     @State private var isWorking = false
     @State private var isVisible = false
     @State private var batchTask: Task<[IOSBatchSignResult], Error>?
@@ -271,6 +272,9 @@ struct IOSStandaloneQRCodeSignView: View {
                                     if resolvedDetail?.isPositionRequired == true {
                                         CxBadge("需定位", tone: .sage, icon: "location.fill")
                                     }
+                                    if resolvedDetail?.isRefreshQRCode == true {
+                                        CxBadge("动态码 · 免错峰", tone: .amber, showDot: true)
+                                    }
                                 }
                                 if let act = resolvedActivity {
                                     Text(act.nameOne)
@@ -316,6 +320,19 @@ struct IOSStandaloneQRCodeSignView: View {
                 }
 
                 Section {
+                    Toggle(isOn: $autoSubmitOnScan) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("扫到即签（动态码推荐）")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(CxPalette.ink)
+                            Text("识别二维码后立即提交，降低动态码过期概率")
+                                .font(.caption)
+                                .foregroundStyle(CxPalette.inkSecondary)
+                        }
+                    }
+                    .tint(CxPalette.accent)
+                    .cxCardRow()
+
                     Button {
                         appState.launchSessionTask { await submitStandaloneQRSign() }
                     } label: {
@@ -444,13 +461,16 @@ struct IOSStandaloneQRCodeSignView: View {
         let token = appState.sessionToken
         do {
             try await resolution.resolve(raw) { payload in
-                let activity = try await ChaoxingActivityService.buildActivityFromQRCode(client: client, qrResult: payload)
-                try Task.checkCancellation()
-                let detail = try await ChaoxingActivityService.fetchSignDetail(client: client, activeId: activity.id, fallbackClassId: activity.classId, fallbackCourseId: activity.courseId)
-                return (activity, detail)
+                try await ChaoxingActivityService.buildActivityAndDetailFromQRCode(client: client, qrResult: payload)
             }
             try appState.checkSession(token)
             if resolvedDetail?.isPositionRequired == true { includeLocation = true }
+            if autoSubmitOnScan,
+               !isWorking,
+               !targetAccounts.isEmpty,
+               resolvedDetail?.isPositionRequired != true || selectedLocationPreset != nil {
+                appState.launchSessionTask { await submitStandaloneQRSign() }
+            }
         } catch {
             if !appState.isCurrent(token) { resolution.invalidate() }
             if appState.isCurrent(token), !(error is CancellationError), !Task.isCancelled, rawQRText == raw {
@@ -476,7 +496,7 @@ struct IOSStandaloneQRCodeSignView: View {
         let jitter = appState.enableLocationJitter
         let phones = selectedPhones
         let task = Task {
-            try await appState.executeSignBatch(activity: activity, selectedPhones: phones, onProgress: { results = $0 }) { client, _, validate, enc2 in
+            try await appState.executeSignBatch(activity: activity, selectedPhones: phones, ignoreBatchDelay: detail.isRefreshQRCode, onProgress: { results = $0 }) { client, _, validate, enc2 in
                 let location = preset?.toSignInfo(enableRandomOffset: jitter)
                 let face = detail.isFaceRequired ? try await ChaoxingFaceService.fetchUserProfileFaceObjectId(client: client) : nil
                 try Task.checkCancellation()

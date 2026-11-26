@@ -132,13 +132,29 @@ extension ProtocolRegressionTests {
         #expect(try await ChaoxingCaptchaService.verifyCaptcha(client: c, captcha: captcha, xPosition: 42, refererURL: "https://example.invalid/") == "a+b")
     }
 
-    @Test("Signing query preserves plus and percent as data")
+    @Test("Signing POST form preserves plus and percent as data with required headers")
     func queryEscaping() async throws {
         let c = client(body: "success")
         _ = try await ChaoxingSignExecutor.signPhotoOrClick(client: c, activity: Self.activity, captchaValidate: "a+b%20")
-        let url = try #require(ProtocolMockURLProtocol.store.requests.last?.url)
-        #expect(url.absoluteString.contains("name=A%2BB"))
-        #expect(url.absoluteString.contains("validate=a%2Bb%2520"))
+        let req = try #require(ProtocolMockURLProtocol.store.requests.last)
+        #expect(req.httpMethod == "POST")
+        #expect(req.value(forHTTPHeaderField: "X-Requested-With") == "XMLHttpRequest")
+        #expect(req.value(forHTTPHeaderField: "Referer")?.contains("/newsign/preSign") == true)
+        var bodyData = req.httpBody
+        if bodyData == nil, let stream = req.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count > 0 { data.append(buffer, count: count) } else { break }
+            }
+            bodyData = data
+        }
+        let body = try #require(bodyData.flatMap { String(data: $0, encoding: .utf8) })
+        #expect(body.contains("name=A%2BB"))
+        #expect(body.contains("validate=a%2Bb%2520"))
     }
 }
 
@@ -206,5 +222,55 @@ extension ProtocolRegressionTests {
         #expect(CGImageDestinationFinalize(destination))
         let position = try #require(ChaoxingCaptchaSolver.estimateXPosition(shadeImageData: data as Data, cutoutImageData: try makeImage(width: 60, height: 60, transparentBorder: true)))
         #expect((98...102).contains(position))
+    }
+
+    @Test("fetchSignDetail re-authenticates once on 403 and parses string-typed IDs")
+    func fetchSignDetailReLoginAndStringIds() async throws {
+        let c = client(body: "{}")
+        ProtocolMockURLProtocol.store.reset { request in
+            let path = request.url?.path ?? ""
+            if path.contains("getPPTActiveInfo") {
+                let count = ProtocolMockURLProtocol.store.requests.filter { $0.url?.path.contains("getPPTActiveInfo") == true }.count
+                if count == 1 {
+                    return (403, Data("Forbidden".utf8))
+                }
+                let json = """
+                {
+                  "result": true,
+                  "data": {
+                    "otherId": "2",
+                    "name": "动态二维码签到",
+                    "clazzid": "654321",
+                    "courseId": "987654",
+                    "ifopenAddress": "1",
+                    "ifrefreshewm": "1",
+                    "locationLatitude": "39.908722",
+                    "locationLongitude": "116.397499",
+                    "locationRange": "200"
+                  }
+                }
+                """
+                return (200, Data(json.utf8))
+            }
+            if path.contains("fanyalogin") {
+                return (200, Data("{\"status\":true}".utf8))
+            }
+            if path.contains("userLogin4Uname") {
+                return (200, Data("{\"msg\":{\"uid\":1001,\"puid\":2002,\"fid\":3003,\"name\":\"测试用户\",\"uname\":\"u\",\"pic\":\"\",\"schoolname\":\"示例学校\"}}".utf8))
+            }
+            return (404, Data())
+        }
+        let (activity, detail) = try await ChaoxingActivityService.buildActivityAndDetailFromQRCode(
+            client: c,
+            qrResult: ChaoxingQRCodeParseResult(aid: 505, code: "c1", enc: "e1")
+        )
+        let detailCalls = ProtocolMockURLProtocol.store.requests.filter { $0.url?.path.contains("getPPTActiveInfo") == true }.count
+        #expect(detailCalls == 2)
+        #expect(activity.id == 505)
+        #expect(activity.classId == 654321)
+        #expect(activity.courseId == 987654)
+        #expect(detail.isPositionRequired)
+        #expect(detail.isRefreshQRCode)
+        #expect(detail.targetLocation?.rangeMeters == 200)
     }
 }

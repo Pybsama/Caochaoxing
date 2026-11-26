@@ -70,7 +70,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "Caochaoxing"
-            packageVersion = "1.1.0"
+            packageVersion = "1.1.1"
             description = "Caochaoxing Windows Desktop Client (Course Study, Groups & Sign-In)"
             vendor = "Pybsama"
             copyright = "Copyright (c) 2026 Pybsama. Licensed under AGPL-3.0-only."

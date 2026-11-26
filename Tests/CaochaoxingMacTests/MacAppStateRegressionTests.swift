@@ -57,8 +57,26 @@ private final class OfflineMacTransport: URLProtocol, @unchecked Sendable {
 }
 
 private func query(_ name: String, in request: URLRequest) -> String? {
-    guard let url = request.url else { return nil }
-    return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == name }?.value
+    if let url = request.url,
+       let val = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == name })?.value {
+        return val
+    }
+    var bodyData = request.httpBody
+    if bodyData == nil, let stream = request.httpBodyStream {
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count > 0 { data.append(buffer, count: count) } else { break }
+        }
+        bodyData = data
+    }
+    guard let data = bodyData, let body = String(data: data, encoding: .utf8) else { return nil }
+    var comps = URLComponents()
+    comps.percentEncodedQuery = body
+    return comps.queryItems?.first(where: { $0.name == name })?.value
 }
 
 private func sampleActivity(type: String = "0", status: Int = 1, endTime: Int64? = nil) -> ChaoxingSignActivity {
@@ -173,7 +191,9 @@ struct MacAppStateRegressionTests {
         let task = try #require(f.run(prepared: f.prepared(.readyToSign), phones: ["A", "B", "C", "D"]) { results = $0 })
         await task.value
         #expect(results.map(\.disposition) == [.alreadySigned, .alreadySigned, .accepted, .failed])
-        #expect(OfflineMacTransport.requests(named: "stuSignajax").compactMap { query("uid", in: $0) } == ["2", "3", "4"])
+        let signReqs = OfflineMacTransport.requests(named: "stuSignajax")
+        #expect(signReqs.compactMap { query("uid", in: $0) } == ["2", "3", "4"])
+        #expect(signReqs.allSatisfy { $0.httpMethod == "POST" && $0.value(forHTTPHeaderField: "X-Requested-With") == "XMLHttpRequest" && ($0.value(forHTTPHeaderField: "Referer")?.contains("/newsign/preSign") == true) })
         let entry = try #require(f.state.signHistory.first)
         #expect(entry.successCount == 1 && entry.alreadySignedCount == 2 && entry.totalCount == 4)
         let saved = try await f.store.load().signHistory

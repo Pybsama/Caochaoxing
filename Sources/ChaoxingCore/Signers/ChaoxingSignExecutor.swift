@@ -190,7 +190,7 @@ public enum ChaoxingSignExecutor {
         if let enc2 {
             items.append(URLQueryItem(name: "enc2", value: enc2))
         }
-        return try await submitSign(client: client, queryItems: items, location: nil)
+        return try await submitSign(client: client, activity: activity, queryItems: items, location: nil)
     }
 
     public static func signLocation(
@@ -230,7 +230,7 @@ public enum ChaoxingSignExecutor {
             activeId: activity.id,
             faceImageObjectId: faceImageObjectId
         )
-        return try await submitSign(client: client, queryItems: items, location: location)
+        return try await submitSign(client: client, activity: activity, queryItems: items, location: location)
     }
 
     public static func signQRCode(
@@ -246,16 +246,14 @@ public enum ChaoxingSignExecutor {
             throw ChaoxingError.invalidInput("二维码不属于当前活动，请重新选择活动或扫描对应二维码")
         }
         let targetActiveId = activity.id
-        let latStr = location.map { String(format: "%.6f", $0.randomizedLatitude) } ?? "-1"
-        let lonStr = location.map { String(format: "%.6f", $0.randomizedLongitude) } ?? "-1"
         var items: [URLQueryItem] = [
             URLQueryItem(name: "enc", value: qrResult.enc),
             URLQueryItem(name: "name", value: client.session.name),
             URLQueryItem(name: "activeId", value: String(targetActiveId)),
             URLQueryItem(name: "uid", value: String(client.session.puid)),
             URLQueryItem(name: "clientip", value: ""),
-            URLQueryItem(name: "latitude", value: latStr),
-            URLQueryItem(name: "longitude", value: lonStr),
+            URLQueryItem(name: "latitude", value: "-1"),
+            URLQueryItem(name: "longitude", value: "-1"),
             URLQueryItem(name: "fid", value: String(client.session.configuredFid)),
             URLQueryItem(name: "appType", value: "15"),
             URLQueryItem(name: "deviceCode", value: client.session.deviceCode),
@@ -279,7 +277,7 @@ public enum ChaoxingSignExecutor {
             activeId: targetActiveId,
             faceImageObjectId: faceImageObjectId
         )
-        return try await submitSign(client: client, queryItems: items, location: location)
+        return try await submitSign(client: client, activity: activity, queryItems: items, location: location)
     }
 
     public static func signCodeOrGesture(
@@ -315,7 +313,7 @@ public enum ChaoxingSignExecutor {
         if let captchaValidate {
             items.append(URLQueryItem(name: "validate", value: captchaValidate))
         }
-        return try await submitSign(client: client, queryItems: items, location: location)
+        return try await submitSign(client: client, activity: activity, queryItems: items, location: location)
     }
 
     private static func appendFaceParameters(
@@ -358,15 +356,24 @@ public enum ChaoxingSignExecutor {
 
     private static func submitSign(
         client: ChaoxingHTTPClient,
+        activity: ChaoxingSignActivity,
         queryItems: [URLQueryItem],
         location: ChaoxingLocationSignInfo?
     ) async throws -> ChaoxingSignOutcome {
-        var components = URLComponents(string: stuSignBase)!
-        components.queryItems = queryItems
-        guard let url = components.chaoxingQueryURL else {
+        guard let url = URL(string: stuSignBase) else {
             throw ChaoxingError.parseFailed("签到请求 URL 无效")
         }
-        let (data, response) = try await client.get(url)
+        let referer = preSignURL(client: client, activity: activity).absoluteString
+        let formItems = queryItems.map { ($0.name, $0.value ?? "") }
+        let (data, response) = try await client.postForm(
+            url,
+            items: formItems,
+            headers: [
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "Referer": referer,
+                "X-Requested-With": "XMLHttpRequest"
+            ]
+        )
         guard (200..<300).contains(response.statusCode) else {
             throw ChaoxingError.networkError(statusCode: response.statusCode, message: "签到请求失败")
         }
@@ -381,7 +388,7 @@ public enum ChaoxingSignExecutor {
         if result == "您已签到过了" {
             throw ChaoxingError.alreadySigned()
         }
-        if result == "签到失败，请重新扫描。" {
+        if result == "签到失败，请重新扫描。" || result == "fail-need-qrcode" {
             throw ChaoxingError.qrCodeExpired()
         }
         if result.hasPrefix("[face]") {

@@ -369,6 +369,7 @@ private fun SignWorkspaceActivityPane(
                 val collected = appState.executeSignBatch(
                     activity = activity,
                     selectedPhones = phones,
+                    ignoreBatchDelay = detailMetadata?.isRefreshQRCode == true,
                     onProgress = { progress ->
                         batchResults = progress
                     },

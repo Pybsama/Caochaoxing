@@ -107,13 +107,26 @@ public enum ChaoxingActivityService {
             throw ChaoxingError.parseFailed("活动详情 URL 无效")
         }
 
-        let (data, response) = try await client.get(url)
+        var (data, response) = try await client.get(url)
+        var root = (200..<300).contains(response.statusCode)
+            ? (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
+            : nil
+        var info = (root?["result"] as? Bool) != false ? (root?["data"] as? [String: Any]) : nil
+        let needsReLogin = response.statusCode == 401 || response.statusCode == 403 || response.statusCode == 302
+            || ((200..<300).contains(response.statusCode) && (root == nil || (root?["result"] as? Bool) == false || info == nil))
+        if needsReLogin {
+            if (try? await ChaoxingAuthService.reLogin(client: client)) != nil {
+                (data, response) = try await client.get(url)
+                root = (200..<300).contains(response.statusCode)
+                    ? (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
+                    : nil
+                info = (root?["result"] as? Bool) != false ? (root?["data"] as? [String: Any]) : nil
+            }
+        }
         guard (200..<300).contains(response.statusCode) else {
             throw ChaoxingError.networkError(statusCode: response.statusCode, message: "获取签到详情失败")
         }
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              (root["result"] as? Bool) != false,
-              let info = root["data"] as? [String: Any],
+        guard let info,
               info["otherId"] is NSNumber || info["otherId"] is String else {
             throw ChaoxingError.parseFailed("获取签到活动信息失败")
         }
@@ -124,8 +137,8 @@ public enum ChaoxingActivityService {
         }
         let signType = ChaoxingSignType(otherId: otherIdStr)
         let title = (info["name"] as? String) ?? (info["title"] as? String) ?? signType.displayName
-        let classId = (info["clazzid"] as? NSNumber)?.intValue ?? fallbackClassId
-        var courseId = (info["courseId"] as? NSNumber)?.int64Value ?? fallbackCourseId
+        let classId = parseInt(info["clazzid"]) ?? parseInt(info["clazzId"]) ?? fallbackClassId
+        var courseId = parseInt64(info["courseId"]) ?? parseInt64(info["courseid"]) ?? fallbackCourseId
         if courseId == 0 && classId != 0 {
             courseId = await ChaoxingCourseService.getCourseIdFromClassId(client: client, classId: classId) ?? 0
         }
@@ -135,18 +148,18 @@ public enum ChaoxingActivityService {
         let isPosition = parseBoolFlag(info["ifopenAddress"])
         let isPhoto = parseBoolFlag(info["ifphoto"])
         let isRefreshQRCode = parseBoolFlag(info["ifrefreshewm"])
-        let numberCount = (info["numberCount"] as? NSNumber)?.intValue
+        let numberCount = parseInt(info["numberCount"])
 
-        let targetLat = (info["locationLatitude"] as? NSNumber)?.doubleValue
-        let targetLon = (info["locationLongitude"] as? NSNumber)?.doubleValue
-        let rangeMeters = (info["locationRange"] as? NSNumber)?.intValue
+        let targetLat = parseDouble(info["locationLatitude"])
+        let targetLon = parseDouble(info["locationLongitude"])
+        let rangeMeters = parseInt(info["locationRange"])
         let targetLocation: ChaoxingLocationTarget? = (targetLat != nil || targetLon != nil || rangeMeters != nil)
             ? ChaoxingLocationTarget(latitude: targetLat, longitude: targetLon, rangeMeters: rangeMeters)
             : nil
 
-        let signInId = (info["signInId"] as? NSNumber)?.int64Value
-        let signOutId = (info["signOutId"] as? NSNumber)?.int64Value
-        let rawSignOutTs = (info["signOutPublishTimeStamp"] as? NSNumber)?.int64Value
+        let signInId = parseInt64(info["signInId"])
+        let signOutId = parseInt64(info["signOutId"])
+        let rawSignOutTs = parseInt64(info["signOutPublishTimeStamp"])
         let signOutPublishTimeMs = (rawSignOutTs == nil || rawSignOutTs == -1 || rawSignOutTs == noSignOffEvent)
             ? nil
             : rawSignOutTs
@@ -178,11 +191,18 @@ public enum ChaoxingActivityService {
         client: ChaoxingHTTPClient,
         qrResult: ChaoxingQRCodeParseResult
     ) async throws -> ChaoxingSignActivity {
+        try await buildActivityAndDetailFromQRCode(client: client, qrResult: qrResult).0
+    }
+
+    public static func buildActivityAndDetailFromQRCode(
+        client: ChaoxingHTTPClient,
+        qrResult: ChaoxingQRCodeParseResult
+    ) async throws -> (ChaoxingSignActivity, ChaoxingSignDetailMetadata) {
         guard let aid = qrResult.aid else {
             throw ChaoxingError.qrCodeParseFailed("二维码中未包含签到活动 ID")
         }
         let detail = try await fetchSignDetail(client: client, activeId: aid)
-        return ChaoxingSignActivity(
+        let activity = ChaoxingSignActivity(
             id: aid,
             startTimeMs: nil,
             endTimeMs: nil,
@@ -199,6 +219,35 @@ public enum ChaoxingActivityService {
             courseName: "二维码扫码活动",
             extContent: "{}"
         )
+        return (activity, detail)
+    }
+
+    private static func parseInt(_ raw: Any?) -> Int? {
+        if raw is Bool { return nil }
+        if let num = raw as? NSNumber { return num.intValue }
+        if let str = raw as? String { return Int(str.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        return nil
+    }
+
+    private static func parseInt64(_ raw: Any?) -> Int64? {
+        if raw is Bool { return nil }
+        if let num = raw as? NSNumber { return num.int64Value }
+        if let str = raw as? String { return Int64(str.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        return nil
+    }
+
+    private static func parseDouble(_ raw: Any?) -> Double? {
+        if raw is Bool { return nil }
+        if let num = raw as? NSNumber {
+            let value = num.doubleValue
+            return value.isFinite ? value : nil
+        }
+        if let str = raw as? String,
+           let value = Double(str.trimmingCharacters(in: .whitespacesAndNewlines)),
+           value.isFinite {
+            return value
+        }
+        return nil
     }
 
     private static func parseBoolFlag(_ raw: Any?) -> Bool {

@@ -159,6 +159,13 @@ enum class ChaoxingClientPreset(
         userAgent = "Dalvik/2.1.0 (Linux; U; Android 12; SM-N9006 Build/8aba9e4.0) (schild:2d97f7b9439f21333c946878fc4d6ccb) (device:SM-N9006) Language/zh_CN com.chaoxing.mobile/ChaoXingStudy_3_6.7.5_android_phone_10941_314 (@Kalimdor)_68f184fd763546c1a04ab3a09b3deebb",
     ),
 
+    @SerialName("@@official_webview")
+    OFFICIAL_WEBVIEW(
+        rawValue = "@@official_webview",
+        displayName = "官方 WebView 版",
+        userAgent = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP2A.240805.005; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/128.0.6613.127 Mobile Safari/537.36 (schild:2d97f7b9439f21333c946878fc4d6ccb) (device:Pixel 8) Language/zh_CN com.chaoxing.mobile/ChaoXingStudy_3_6.7.5_android_phone_10941_314 (@Kalimdor)_68f184fd763546c1a04ab3a09b3deebb",
+    ),
+
     @SerialName("@@xuezaixidian")
     XUE_ZAI_XI_DIAN(
         rawValue = "@@xuezaixidian",

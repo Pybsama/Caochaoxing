@@ -195,6 +195,16 @@ class ServicesAndSignExecutorTest {
     ) {
         fun queryValue(name: String): String? =
             queryPairs.firstOrNull { it.first == name }?.second
+
+        fun formValue(name: String): String? {
+            if (body.isEmpty()) return null
+            return body.split("&").mapNotNull { segment ->
+                val eq = segment.indexOf('=')
+                if (eq < 0) null
+                else URLDecoder.decode(segment.substring(0, eq), "UTF-8") to
+                    URLDecoder.decode(segment.substring(eq + 1), "UTF-8")
+            }.firstOrNull { it.first == name }?.second
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -434,6 +444,77 @@ class ServicesAndSignExecutorTest {
         }
     }
 
+    @Test
+    fun `fetchSignDetail re-authenticates once on 403 and parses string-typed IDs`() = runBlocking {
+        val detailAttempts = AtomicInteger(0)
+        val loginCalls = AtomicInteger(0)
+        withServer(
+            handler = { req ->
+                when (req.requestUrl?.encodedPath) {
+                    "/v2/apis/active/getPPTActiveInfo" -> {
+                        if (detailAttempts.getAndIncrement() == 0) {
+                            MockResponse().setResponseCode(403).setBody("Forbidden")
+                        } else {
+                            MockResponse().setBody(
+                                """
+                                {
+                                  "result": true,
+                                  "data": {
+                                    "otherId": "2",
+                                    "name": "动态二维码签到",
+                                    "clazzid": "654321",
+                                    "courseId": "987654",
+                                    "ifopenAddress": "1",
+                                    "ifrefreshewm": "1",
+                                    "locationLatitude": "39.908722",
+                                    "locationLongitude": "116.397499",
+                                    "locationRange": "200"
+                                  }
+                                }
+                                """.trimIndent(),
+                            )
+                        }
+                    }
+
+                    "/fanyalogin" -> {
+                        loginCalls.incrementAndGet()
+                        MockResponse()
+                            .addHeader("Set-Cookie", "UID=1001; Path=/")
+                            .setBody("""{"status":true}""")
+                    }
+
+                    "/apis/login/userLogin4Uname.do" -> {
+                        MockResponse().setBody(
+                            """{"msg":{"uid":1001,"puid":2002,"fid":3003,"name":"测试用户","uname":"u","pic":"","schoolname":"示例学校"}}""",
+                        )
+                    }
+
+                    else -> MockResponse().setResponseCode(404)
+                }
+            },
+        ) { _, endpoints, _ ->
+            val client = ChaoxingHttpClient.createForLoopbackTesting(syntheticSession())
+            try {
+                val (activity, detail) = ChaoxingActivityService.buildActivityAndDetailFromQrCode(
+                    endpoints,
+                    client,
+                    ChaoxingQrCodeParseResult(aid = 505L, code = "c1", enc = "e1"),
+                )
+                assertEquals(1, loginCalls.get())
+                assertEquals(2, detailAttempts.get())
+                assertEquals(505L, activity.id)
+                assertEquals(654321, activity.classId)
+                assertEquals(987654L, activity.courseId)
+                assertTrue(detail.isPositionRequired)
+                assertTrue(detail.isRefreshQRCode)
+                assertEquals(200, detail.targetLocation?.rangeMeters)
+                assertEquals(39.908722, detail.targetLocation?.latitude ?: 0.0, 1e-6)
+            } finally {
+                client.invalidate()
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Required Case 3: CloudDrive uploadImage clears cached token on 401 & retries
     // -------------------------------------------------------------------------
@@ -528,6 +609,7 @@ class ServicesAndSignExecutorTest {
             "success2",
             "您已签到过了",
             "签到失败，请重新扫描。",
+            "fail-need-qrcode",
             "[face]人脸未通过",
             "errorLocation_128.4",
             "同一设备不允许重复签到",
@@ -542,50 +624,54 @@ class ServicesAndSignExecutorTest {
             },
         ) { _, endpoints, _ ->
             val client = ChaoxingHttpClient.createForLoopbackTesting(syntheticSession())
+            val activity = syntheticActivity()
             try {
                 val captchaWithEnc2 = assertSuspendsThrows<ChaoxingError.CaptchaRequired> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 assertEquals("myEnc2", captchaWithEnc2.enc2)
 
                 val captchaWithoutEnc2 = assertSuspendsThrows<ChaoxingError.CaptchaRequired> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 assertNull(captchaWithoutEnc2.enc2)
 
-                val ok = ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                val ok = ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 assertTrue(ok.success)
                 assertEquals("签到成功", ok.message)
 
                 assertSuspendsThrows<ChaoxingError.SignAlreadyEnded> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 assertSuspendsThrows<ChaoxingError.AlreadySigned> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 assertSuspendsThrows<ChaoxingError.QrCodeExpired> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
+                }
+                assertSuspendsThrows<ChaoxingError.QrCodeExpired> {
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 val face1 = assertSuspendsThrows<ChaoxingError.FaceError> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 assertEquals("人脸未通过", face1.message)
 
                 val wrongPos = assertSuspendsThrows<ChaoxingError.WrongPosition> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 assertEquals(128.4, wrongPos.distanceMeters)
 
                 assertSuspendsThrows<ChaoxingError.DeviceDuplicated> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 val face2 = assertSuspendsThrows<ChaoxingError.FaceError> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 assertTrue(face2.message.contains("checkFace_42"))
 
                 val serverMsg = assertSuspendsThrows<ChaoxingError.ServerMessage> {
-                    ChaoxingSignExecutor.submitSign(endpoints, client, listOf("activeId" to "1"))
+                    ChaoxingSignExecutor.submitSign(endpoints, client, activity, listOf("activeId" to "1"))
                 }
                 assertEquals("自定义异常消息", serverMsg.message)
             } finally {
@@ -631,26 +717,28 @@ class ServicesAndSignExecutorTest {
                 assertTrue(outcome.success)
 
                 val signReq = recorded.last { it.path == "/pptSign/stuSignajax" }
-                assertEquals("39.908722", signReq.queryValue("latitude"))
-                assertEquals("116.397499", signReq.queryValue("longitude"))
-                assertNotEquals("-1", signReq.queryValue("latitude"))
-                assertNotEquals("-1", signReq.queryValue("longitude"))
-                assertEquals("qr-enc+1", signReq.queryValue("enc"))
-                assertEquals("val+1", signReq.queryValue("validate"))
-                assertEquals("enc2-val", signReq.queryValue("enc2"))
-                assertEquals("face-enc-xyz", signReq.queryValue("faceEnc"))
-                assertEquals("face-obj-1", signReq.queryValue("currentFaceId"))
-                assertTrue(signReq.rawPath.contains("name=A%2BB"))
-                assertTrue(signReq.rawPath.contains("validate=val%2B1"))
+                assertEquals("POST", signReq.method)
+                assertEquals("XMLHttpRequest", signReq.headers["X-Requested-With"])
+                assertTrue(signReq.headers["Referer"].orEmpty().contains("/newsign/preSign"))
+                assertTrue(signReq.queryPairs.isEmpty())
+                assertEquals("-1", signReq.formValue("latitude"))
+                assertEquals("-1", signReq.formValue("longitude"))
+                assertEquals("qr-enc+1", signReq.formValue("enc"))
+                assertEquals("val+1", signReq.formValue("validate"))
+                assertEquals("enc2-val", signReq.formValue("enc2"))
+                assertEquals("face-enc-xyz", signReq.formValue("faceEnc"))
+                assertEquals("face-obj-1", signReq.formValue("currentFaceId"))
+                assertTrue(signReq.body.contains("name=A%2BB"))
+                assertTrue(signReq.body.contains("validate=val%2B1"))
 
-                val locationJson = parseJsonObjectOrNull(signReq.queryValue("location").orEmpty())!!
+                val locationJson = parseJsonObjectOrNull(signReq.formValue("location").orEmpty())!!
                 assertEquals(1, locationJson.numberIntOrNull("result"))
                 assertEquals(39.908722, locationJson.numberDoubleOrNull("latitude")!!, 1e-6)
                 assertEquals(116.397499, locationJson.numberDoubleOrNull("longitude")!!, 1e-6)
                 assertEquals("北京市东城区天安门", locationJson.stringOnlyOrNull("address"))
                 assertNull(locationJson["mockData"])
 
-                val locationResultJson = parseJsonObjectOrNull(signReq.queryValue("locationResult").orEmpty())!!
+                val locationResultJson = parseJsonObjectOrNull(signReq.formValue("locationResult").orEmpty())!!
                 assertEquals(1, locationResultJson.numberIntOrNull("result"))
                 assertEquals(39.908722, locationResultJson.numberDoubleOrNull("latitude")!!, 1e-6)
                 assertEquals(116.397499, locationResultJson.numberDoubleOrNull("longitude")!!, 1e-6)
@@ -665,10 +753,11 @@ class ServicesAndSignExecutorTest {
                     location = null,
                 )
                 val noLocReq = recorded.last { it.path == "/pptSign/stuSignajax" }
-                assertEquals("-1", noLocReq.queryValue("latitude"))
-                assertEquals("-1", noLocReq.queryValue("longitude"))
-                assertNull(noLocReq.queryValue("location"))
-                assertNull(noLocReq.queryValue("locationResult"))
+                assertEquals("POST", noLocReq.method)
+                assertEquals("-1", noLocReq.formValue("latitude"))
+                assertEquals("-1", noLocReq.formValue("longitude"))
+                assertNull(noLocReq.formValue("location"))
+                assertNull(noLocReq.formValue("locationResult"))
 
                 // Mismatched aid rejected before any HTTP call
                 val countBefore = recorded.size
@@ -1043,8 +1132,10 @@ class ServicesAndSignExecutorTest {
                     ).success,
                 )
                 val locReq = recorded.last { it.path == "/pptSign/stuSignajax" }
-                assertEquals("face-enc-token", locReq.queryValue("faceEnc"))
-                assertEquals("人民广场", locReq.queryValue("address"))
+                assertEquals("POST", locReq.method)
+                assertEquals("XMLHttpRequest", locReq.headers["X-Requested-With"])
+                assertEquals("face-enc-token", locReq.formValue("faceEnc"))
+                assertEquals("人民广场", locReq.formValue("address"))
 
                 assertTrue(
                     ChaoxingSignExecutor.signCodeOrGesture(
@@ -1056,8 +1147,9 @@ class ServicesAndSignExecutorTest {
                     ).success,
                 )
                 val codeReq = recorded.last { it.path == "/pptSign/stuSignajax" }
-                assertEquals("12369", codeReq.queryValue("signCode"))
-                assertNotNull(codeReq.queryValue("locationResult"))
+                assertEquals("POST", codeReq.method)
+                assertEquals("12369", codeReq.formValue("signCode"))
+                assertNotNull(codeReq.formValue("locationResult"))
             } finally {
                 client.invalidate()
             }
@@ -1202,11 +1294,13 @@ class ServicesAndSignExecutorTest {
                 )
                 assertTrue(photoOutcome.success)
                 val photoReq = recorded.last { it.path == "/pptSign/stuSignajax" }
-                assertEquals("photo-obj-1", photoReq.queryValue("objectId"))
-                assertEquals("val+token", photoReq.queryValue("validate"))
-                assertEquals("enc2-token", photoReq.queryValue("enc2"))
-                assertEquals("-1", photoReq.queryValue("latitude"))
-                assertEquals("-1", photoReq.queryValue("longitude"))
+                assertEquals("POST", photoReq.method)
+                assertEquals("XMLHttpRequest", photoReq.headers["X-Requested-With"])
+                assertEquals("photo-obj-1", photoReq.formValue("objectId"))
+                assertEquals("val+token", photoReq.formValue("validate"))
+                assertEquals("enc2-token", photoReq.formValue("enc2"))
+                assertEquals("-1", photoReq.formValue("latitude"))
+                assertEquals("-1", photoReq.formValue("longitude"))
 
                 val err = assertSuspendsThrows<ChaoxingError.ParseFailed> {
                     ChaoxingGroupService.fetchJoinedGroups(

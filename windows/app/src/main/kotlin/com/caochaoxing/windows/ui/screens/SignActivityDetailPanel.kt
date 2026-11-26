@@ -852,6 +852,7 @@ fun SignActivityDetailPanel(
                         val results = appState.executeSignBatch(
                             activity = activity,
                             selectedPhones = selectedPhones,
+                            ignoreBatchDelay = detail?.isRefreshQRCode == true,
                             onProgress = { progress -> batchResults = progress },
                         ) { client, _, captchaValidate, enc2 ->
                             when (effectiveType) {
